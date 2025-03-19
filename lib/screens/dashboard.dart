@@ -16,7 +16,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic> _latestReading = {
     'systolic': 119,
     'diastolic': 76,
-    'pulse': 68,
+    'pulse': 78,
     'status': 'Optimal',
   };
 
