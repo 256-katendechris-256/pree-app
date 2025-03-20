@@ -16,10 +16,13 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
   final TextEditingController _dateController = TextEditingController();
   final TextEditingController _timeController = TextEditingController();
   final FocusNode _systolicFocusNode = FocusNode();
+  final FocusNode _diastolicFocusNode = FocusNode();
+  final FocusNode _pulseFocusNode = FocusNode();
 
-  bool _showNumpad = true;
+  bool _showNumpad = false; // Initially hide the numpad
   String _currentFieldValue = '';
   TextEditingController? _currentController;
+  FocusNode? _currentFocusNode;
 
   @override
   void initState() {
@@ -29,9 +32,9 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
     _dateController.text = DateFormat('dd/MM/yyyy').format(now);
     _timeController.text = DateFormat('h:mm a').format(now);
 
-    // Set default focus to systolic field
-    _systolicFocusNode.requestFocus();
+    // Set default values for focus and controllers
     _currentController = _systolicController;
+    _currentFocusNode = _systolicFocusNode;
   }
 
   @override
@@ -42,6 +45,8 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
     _dateController.dispose();
     _timeController.dispose();
     _systolicFocusNode.dispose();
+    _diastolicFocusNode.dispose();
+    _pulseFocusNode.dispose();
     super.dispose();
   }
 
@@ -56,11 +61,9 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
       } else if (value == 'Next') {
         // Handle next field logic
         if (_currentController == _systolicController) {
-          _currentController = _diastolicController;
-          _currentFieldValue = _diastolicController.text;
+          _setFocusToField(_diastolicController, _diastolicFocusNode);
         } else if (_currentController == _diastolicController) {
-          _currentController = _pulseController;
-          _currentFieldValue = _pulseController.text;
+          _setFocusToField(_pulseController, _pulseFocusNode);
         } else {
           // Submit form if on the last field
           _saveReading();
@@ -79,6 +82,15 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
 
       // Update the controller text
       _currentController!.text = _currentFieldValue;
+    });
+  }
+
+  void _setFocusToField(TextEditingController controller, FocusNode focusNode) {
+    setState(() {
+      _currentController = controller;
+      _currentFocusNode = focusNode;
+      _currentFieldValue = controller.text;
+      focusNode.requestFocus();
     });
   }
 
@@ -149,6 +161,11 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
                     readOnly: true,
                     trailingIcon: Icons.calendar_today,
                     onTap: () async {
+                      // Hide numpad when selecting date
+                      setState(() {
+                        _showNumpad = false;
+                      });
+
                       final DateTime? picked = await showDatePicker(
                         context: context,
                         initialDate: DateTime.now(),
@@ -167,6 +184,11 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
                     controller: _timeController,
                     readOnly: true,
                     onTap: () async {
+                      // Hide numpad when selecting time
+                      setState(() {
+                        _showNumpad = false;
+                      });
+
                       final TimeOfDay? picked = await showTimePicker(
                         context: context,
                         initialTime: TimeOfDay.now(),
@@ -186,23 +208,46 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
                     controller: _systolicController,
                     suffix: 'mmHg',
                     focusNode: _systolicFocusNode,
+                    showCursor: true,
+                    onTap: () {
+                      _setFocusToField(_systolicController, _systolicFocusNode);
+                      setState(() {
+                        _showNumpad = true;
+                      });
+                    },
                   ),
                   _buildInputField(
                     label: 'Diastolic\n(Lower Number):',
                     controller: _diastolicController,
                     suffix: 'mmHg',
+                    focusNode: _diastolicFocusNode,
+                    showCursor: true,
+                    onTap: () {
+                      _setFocusToField(_diastolicController, _diastolicFocusNode);
+                      setState(() {
+                        _showNumpad = true;
+                      });
+                    },
                   ),
                   _buildInputField(
                     label: 'Pulse:',
                     controller: _pulseController,
                     suffix: 'BPM',
+                    focusNode: _pulseFocusNode,
+                    showCursor: true,
+                    onTap: () {
+                      _setFocusToField(_pulseController, _pulseFocusNode);
+                      setState(() {
+                        _showNumpad = true;
+                      });
+                    },
                   ),
                 ],
               ),
             ),
           ),
 
-          // Numpad
+          // Numpad (only shown when a numeric field is tapped)
           if (_showNumpad)
             _buildNumpad(),
         ],
@@ -218,7 +263,10 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
     VoidCallback? onTap,
     IconData? trailingIcon,
     FocusNode? focusNode,
+    bool showCursor = false,
   }) {
+    final bool isCurrentFocus = _currentFocusNode == focusNode;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: Row(
@@ -235,32 +283,37 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
           ),
           Expanded(
             child: GestureDetector(
-              onTap: () {
-                if (!readOnly) {
-                  setState(() {
-                    _currentController = controller;
-                    _currentFieldValue = controller.text;
-                    _showNumpad = true;
-                  });
-                } else if (onTap != null) {
-                  onTap();
-                }
-              },
+              onTap: onTap,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
+                  border: Border.all(
+                    color: isCurrentFocus ? Colors.blue.shade700 : Colors.grey.shade300,
+                    width: isCurrentFocus ? 2.0 : 1.0,
+                  ),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        controller.text,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.black87,
-                        ),
+                      child: Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          Text(
+                            controller.text,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          if (showCursor && isCurrentFocus && controller.text.isEmpty)
+                            Container(
+                              width: 2,
+                              height: 20,
+                              color: Colors.blue.shade700,
+                              margin: const EdgeInsets.only(left: 2),
+                            ),
+                        ],
                       ),
                     ),
                     if (suffix != null)
