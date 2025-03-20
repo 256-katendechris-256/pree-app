@@ -3,6 +3,7 @@ import '../widgets/category_card.dart';
 import '../screens/manual_reading.dart';
 import 'activity.dart';
 import 'dairy.dart';
+import 'overview.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -13,7 +14,8 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
-  String _selectedCategory = 'Overview'; // Default selected category
+  String _selectedCategory = 'Blood Pressure'; // Changed default to Blood Pressure
+  bool _isNavigating = false; // Flag to prevent multiple navigation attempts
 
   // Blood pressure data
   Map<String, dynamic> _latestReading = {
@@ -52,7 +54,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         children: [
           _buildCategorySection(),
           Expanded(
-            child: _buildMainContent(),
+            child: _getContentForSelectedCategory(),
           ),
         ],
       ),
@@ -93,32 +95,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _selectedCategory = category;
     });
-
-    // Handle navigation based on the selected category
-    switch (category) {
-      case 'Activity':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const ActivityScreen()),
-        ).then((_) {
-          // Reset to Overview when returning from Activity screen
-          setState(() {
-            _selectedCategory = 'Overview';
-          });
-        });
-        break;
-      case 'Blood Pressure':
-      // Navigate to Blood Pressure screen when implemented
-      // Reset to Overview when returning
-        break;
-      case 'Weight':
-      // Navigate to Weight screen when implemented
-      // Reset to Overview when returning
-        break;
-      default:
-      // Already on Overview, no navigation needed
-        break;
-    }
   }
 
   // Get color and text color for a category card based on selection
@@ -251,6 +227,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ),
     );
+  }
+
+  // Render different content based on selected category
+  Widget _getContentForSelectedCategory() {
+    if (_selectedCategory == 'Overview' && !_isNavigating) {
+      _isNavigating = true;
+      // Use a post-frame callback to avoid build issues
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const HealthOverviewScreen()),
+        ).then((_) {
+          setState(() {
+            _selectedCategory = 'Blood Pressure';
+            _isNavigating = false;
+          });
+        });
+      });
+    } else if (_selectedCategory == 'Activity' && !_isNavigating) {
+      _isNavigating = true;
+      // Use a post-frame callback to avoid build issues
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ActivityScreen()),
+        ).then((_) {
+          setState(() {
+            _selectedCategory = 'Blood Pressure';
+            _isNavigating = false;
+          });
+        });
+      });
+    }
+
+    // Default rendering
+    switch (_selectedCategory) {
+      case 'Blood Pressure':
+        return _buildMainContent();
+      case 'Activity':
+        return Container(
+          color: Colors.white,
+          child: const Center(
+            child: Text('Loading Activity Screen...'),
+          ),
+        );
+      case 'Overview':
+        return Container(
+          color: Colors.white,
+          child: const Center(
+            child: Text('Loading Overview Screen...'),
+          ),
+        );
+      case 'Weight':
+        return Container(
+          color: Colors.white,
+          child: const Center(
+            child: Text('Weight Screen is under development'),
+          ),
+        );
+      default:
+        return _buildMainContent();
+    }
   }
 
   Widget _buildMainContent() {
@@ -587,6 +625,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+
   Widget _buildBottomNavBar() {
     return BottomNavigationBar(
       currentIndex: _selectedIndex,
