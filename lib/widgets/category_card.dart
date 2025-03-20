@@ -1,4 +1,3 @@
-// widgets/category_card.dart
 import 'package:flutter/material.dart';
 
 class CategoryCard extends StatelessWidget {
@@ -6,44 +5,51 @@ class CategoryCard extends StatelessWidget {
   final String title;
   final Color color;
   final Color iconColor;
-  final Color textColor;
+  final Color? textColor;
+  final VoidCallback? onTap;
 
   const CategoryCard({
-    super.key,
+    Key? key,
     required this.icon,
     required this.title,
     required this.color,
     required this.iconColor,
-    this.textColor = Colors.black87,
-  });
+    this.textColor,
+    this.onTap,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 15),
-      decoration: BoxDecoration(
+    return InkWell(
+      onTap: onTap,
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(5),
+        ),
         color: color,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            color: iconColor,
-            size: 24,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 15),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: iconColor,
+                size: 26,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: textColor ?? Colors.black87,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 5),
-          Text(
-            title,
-            style: TextStyle(
-              color: textColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
+        ),
       ),
     );
   }

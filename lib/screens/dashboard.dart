@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../widgets/category_card.dart';
 import '../screens/manual_reading.dart';
+import 'activity.dart';
+import 'dairy.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -11,6 +13,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
+  String _selectedCategory = 'Overview'; // Default selected category
 
   // Blood pressure data
   Map<String, dynamic> _latestReading = {
@@ -85,39 +88,167 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // Method to handle category selection
+  void _selectCategory(String category) {
+    setState(() {
+      _selectedCategory = category;
+    });
+
+    // Handle navigation based on the selected category
+    switch (category) {
+      case 'Activity':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ActivityScreen()),
+        ).then((_) {
+          // Reset to Overview when returning from Activity screen
+          setState(() {
+            _selectedCategory = 'Overview';
+          });
+        });
+        break;
+      case 'Blood Pressure':
+      // Navigate to Blood Pressure screen when implemented
+      // Reset to Overview when returning
+        break;
+      case 'Weight':
+      // Navigate to Weight screen when implemented
+      // Reset to Overview when returning
+        break;
+      default:
+      // Already on Overview, no navigation needed
+        break;
+    }
+  }
+
+  // Get color and text color for a category card based on selection
+  Map<String, Color> _getCategoryColors(String category) {
+    Color backgroundColor;
+    Color textColor;
+    Color iconColor;
+
+    if (_selectedCategory == category) {
+      // Selected state - use solid colors
+      switch (category) {
+        case 'Overview':
+          backgroundColor = Colors.orange;
+          break;
+        case 'Blood Pressure':
+          backgroundColor = Colors.blue;
+          break;
+        case 'Activity':
+          backgroundColor = Colors.green;
+          break;
+        case 'Weight':
+          backgroundColor = Colors.purple;
+          break;
+        default:
+          backgroundColor = Colors.blue;
+      }
+      textColor = Colors.white;
+      iconColor = Colors.white;
+    } else {
+      // Unselected state
+      backgroundColor = Colors.white;
+      textColor = Colors.black87;
+      switch (category) {
+        case 'Overview':
+          iconColor = Colors.orange;
+          break;
+        case 'Blood Pressure':
+          iconColor = Colors.blue;
+          break;
+        case 'Activity':
+          iconColor = Colors.green;
+          break;
+        case 'Weight':
+          iconColor = Colors.purple;
+          break;
+        default:
+          iconColor = Colors.blue;
+      }
+    }
+
+    return {
+      'backgroundColor': backgroundColor,
+      'textColor': textColor,
+      'iconColor': iconColor,
+    };
+  }
+
+  // Updated _buildCategorySection method with solid highlighting
   Widget _buildCategorySection() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
-      child: Row(
-        children: [
-          Expanded(
-            child: CategoryCard(
-              icon: Icons.person,
-              title: 'My Overview',
-              color: Colors.white,
-              iconColor: Colors.orange,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _buildCategoryCard(
+              'Overview',
+              Icons.person,
+            ),
+            const SizedBox(width: 10),
+            _buildCategoryCard(
+              'Blood Pressure',
+              Icons.favorite,
+            ),
+            const SizedBox(width: 10),
+            _buildCategoryCard(
+              'Activity',
+              Icons.directions_run,
+            ),
+            const SizedBox(width: 10),
+            _buildCategoryCard(
+              'Weight',
+              Icons.monitor_weight,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Helper method to build category cards with consistent styling
+  Widget _buildCategoryCard(String title, IconData icon) {
+    final colors = _getCategoryColors(title);
+
+    return SizedBox(
+      width: 100,
+      child: InkWell(
+        onTap: () {
+          _selectCategory(title);
+        },
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          color: colors['backgroundColor'],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  color: colors['iconColor'],
+                  size: 30,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colors['textColor'],
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: CategoryCard(
-              icon: Icons.favorite,
-              title: 'Blood Pressure',
-              color: const Color(0xFF1E88C7),
-              iconColor: Colors.white,
-              textColor: Colors.white,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: CategoryCard(
-              icon: Icons.directions_run,
-              title: 'Activity',
-              color: Colors.white,
-              iconColor: Colors.green,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -130,12 +261,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             _buildReadingsSection(),
             _buildStatusIndicator(),
-            // HeartShapeDisplay(
-            //   systolic: _latestReading['systolic'],
-            //   diastolic: _latestReading['diastolic'],
-            //   pulse: _latestReading['pulse'],
-            // ),
-            _buildReadingCards(), // Added reading cards here
+            _buildReadingCards(),
             _buildActionButtons(),
             const SizedBox(height: 20),
           ],
@@ -144,7 +270,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // New method to build reading cards
   Widget _buildReadingCards() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
@@ -190,7 +315,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Helper method to build each reading card
   Widget _buildReadingCard({
     required String title,
     required String value,
@@ -436,7 +560,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(
             child: ElevatedButton.icon(
               onPressed: () {
-                // My Diary functionality would go here
+                // Navigate to My Diary screen
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const MyDiaryScreen()),
+                );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue[700],
@@ -459,7 +587,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-
   Widget _buildBottomNavBar() {
     return BottomNavigationBar(
       currentIndex: _selectedIndex,
