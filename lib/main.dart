@@ -2,6 +2,8 @@
 import 'package:finale/screens/dashboard.dart';
 import 'package:flutter/material.dart';
 
+import 'authentication/login.dart';
+
 
 void main() {
   runApp(const BloodPressureApp());
@@ -20,7 +22,7 @@ class BloodPressureApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0069B4),
         fontFamily: 'Roboto',
       ),
-      home: const DashboardScreen(),
+      home: const LoginScreen(),
     );
   }
 }
