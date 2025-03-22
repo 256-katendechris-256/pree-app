@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import '../screens/dashboard.dart';
+import 'overview.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -7,283 +10,290 @@ class ActivityScreen extends StatefulWidget {
   State<ActivityScreen> createState() => _ActivityScreenState();
 }
 
-class _ActivityScreenState extends State<ActivityScreen> {
+class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStateMixin {
+  int _selectedIndex = 0;
+  String _selectedCategory = 'Activity';
+  bool _isNavigating = false;
+  late TabController _tabController;
+
   // Activity data
   final Map<String, dynamic> _activityData = {
-    'steps': 0,
-    'calories': 0,
-    'distance': 0.0,
-    'goal': 8000,
+    'steps': 7358,
+    'calories': 345,
+    'distance': 4.6,
+    'goal': 10000,
   };
+
+  // Weekly activity data
+  final List<Map<String, dynamic>> _weeklyActivity = [
+    {'day': 'Mon', 'steps': 8234, 'calories': 380, 'distance': 5.2},
+    {'day': 'Tue', 'steps': 9512, 'calories': 425, 'distance': 6.1},
+    {'day': 'Wed', 'steps': 7869, 'calories': 362, 'distance': 5.0},
+    {'day': 'Thu', 'steps': 10254, 'calories': 467, 'distance': 6.5},
+    {'day': 'Fri', 'steps': 8543, 'calories': 390, 'distance': 5.5},
+    {'day': 'Sat', 'steps': 6425, 'calories': 298, 'distance': 4.1},
+    {'day': 'Sun', 'steps': 7358, 'calories': 345, 'distance': 4.6},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize TabController with 4 tabs
+    _tabController = TabController(length: 4, vsync: this);
+    _tabController.index = 1; // Set Activity tab selected by default
+
+    // Add listener to handle tab changes
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        setState(() {
+          switch (_tabController.index) {
+            case 0:
+              _selectedCategory = 'Blood Pressure';
+              break;
+            case 1:
+              _selectedCategory = 'Activity';
+              break;
+            case 2:
+              _selectedCategory = 'Weight';
+              break;
+            case 3:
+              _selectedCategory = 'Overview';
+              break;
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        backgroundColor: Theme.of(context).primaryColor,
+        backgroundColor: Colors.indigo,
         elevation: 0,
         title: const Text(
-          'Dashboard',
+          'Health Monitor',
           style: TextStyle(
             color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
           ),
         ),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.help_outline,
-              color: Colors.white,
-            ),
+            icon: const Icon(Icons.notifications_outlined, color: Colors.white),
             onPressed: () {},
           ),
-          _buildSyncButton(),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Syncing data...'))
+              );
+            },
+          ),
         ],
       ),
       body: Column(
         children: [
-          _buildCategorySection(),
+          _buildCategoryTabs(),
           Expanded(
-            child: _buildMainContent(),
+            child: _getContentForSelectedCategory(),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.indigo,
+        onPressed: () => _addManualActivity(),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
-  Widget _buildSyncButton() {
+  Widget _buildCategoryTabs() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.white),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Row(
-        children: [
-          Icon(
-            Icons.sync,
-            color: Colors.white,
-            size: 16,
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 2),
           ),
-          SizedBox(width: 4),
-          Text(
-            'Sync',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
+        ],
+      ),
+      child: TabBar(
+        controller: _tabController,
+        isScrollable: true,
+        indicatorColor: Colors.indigo,
+        indicatorWeight: 3,
+        labelColor: Colors.indigo,
+        unselectedLabelColor: Colors.grey[600],
+        labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+        tabs: [
+          Tab(
+            icon: Icon(
+              Icons.favorite,
+              color: _selectedCategory == 'Blood Pressure' ? Colors.indigo : Colors.grey[600],
             ),
+            text: 'Blood Pressure',
+          ),
+          Tab(
+            icon: Icon(
+              Icons.directions_run,
+              color: _selectedCategory == 'Activity' ? Colors.indigo : Colors.grey[600],
+            ),
+            text: 'Activity',
+          ),
+          Tab(
+            icon: Icon(
+              Icons.monitor_weight,
+              color: _selectedCategory == 'Weight' ? Colors.indigo : Colors.grey[600],
+            ),
+            text: 'Weight',
+          ),
+          Tab(
+            icon: Icon(
+              Icons.dashboard,
+              color: _selectedCategory == 'Overview' ? Colors.indigo : Colors.grey[600],
+            ),
+            text: 'Overview',
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCategorySection() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            SizedBox(
-              width: 100,
-              child: _buildCategoryCard(
-                icon: Icons.person,
-                title: 'My Overview',
-                color: Colors.white,
-                iconColor: Colors.orange,
-                onTap: () {
-                  Navigator.pop(context);
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 100,
-              child: _buildCategoryCard(
-                icon: Icons.favorite,
-                title: 'Blood Pressure',
-                color: Colors.white,
-                iconColor: Colors.blue,
-                onTap: () {
-                  // Navigate to Blood Pressure screen
-                  Navigator.pop(context);
-                  // Add your navigation logic here
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 100,
-              child: _buildCategoryCard(
-                icon: Icons.directions_run,
-                title: 'Activity',
-                color: const Color(0xFF6B9A34), // Green color from the screenshot
-                iconColor: Colors.white,
-                textColor: Colors.white,
-                onTap: () {
-                  // Already on Activity screen
-                },
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 100,
-              child: _buildCategoryCard(
-                icon: Icons.monitor_weight,
-                title: 'Weight',
-                color: Colors.white,
-                iconColor: Colors.purple,
-                onTap: () {
-                  // Navigate to Weight screen
-                  Navigator.pop(context);
-                  // Add your navigation logic here
-                },
-              ),
-            ),
-          ],
+  // Render different content based on selected category
+  Widget _getContentForSelectedCategory() {
+    if (_selectedCategory == 'Blood Pressure' && !_isNavigating) {
+      _isNavigating = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pop(context);
+      });
+      return Container(
+        color: Colors.white,
+        child: const Center(
+          child: Text('Loading Blood Pressure Screen...'),
         ),
-      ),
-    );
-  }
+      );
+    } else if (_selectedCategory == 'Overview' && !_isNavigating) {
+      _isNavigating = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const HealthOverviewScreen()),
+        ).then((_) {
+          setState(() {
+            _selectedCategory = 'Activity';
+            _isNavigating = false;
+            _tabController.animateTo(1); // Reset tab selection to Activity
+          });
+        });
+      });
+    }
 
-  Widget _buildCategoryCard({
-    required IconData icon,
-    required String title,
-    required Color color,
-    required Color iconColor,
-    Color? textColor,
-    VoidCallback? onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(5),
-        ),
-        color: color,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: iconColor,
-                size: 26,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  color: textColor ?? Colors.black87,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
+    switch (_selectedCategory) {
+      case 'Activity':
+        return _buildActivityContent();
+      case 'Weight':
+        return Container(
+          color: Colors.white,
+          child: const Center(
+            child: Text('Weight Screen is under development'),
           ),
-        ),
+        );
+      default:
+        return _buildActivityContent();
+    }
+  }
+
+  Widget _buildActivityContent() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildStatusCard(),
+          _buildActivitySummaryCard(),
+          _buildWeeklyChart(),
+          _buildGoalProgressCard(),
+          _buildActionButtons(),
+          const SizedBox(height: 20),
+        ],
       ),
     );
   }
 
-  Widget _buildMainContent() {
-    return Container(
-      color: Colors.white,
-      child: SingleChildScrollView(
+  Widget _buildStatusCard() {
+    // Calculate percentage of daily goal completed
+    final double percentComplete = (_activityData['steps'] / _activityData['goal']) * 100;
+    final String statusText = percentComplete >= 100
+        ? 'Goal Achieved!'
+        : percentComplete >= 75
+        ? 'Almost There!'
+        : percentComplete >= 50
+        ? 'Good Progress'
+        : 'Keep Moving';
+
+    final Color statusColor = percentComplete >= 100
+        ? Colors.green
+        : percentComplete >= 75
+        ? Colors.blue
+        : percentComplete >= 50
+        ? Colors.orange
+        : Colors.amber;
+
+    return Card(
+      margin: const EdgeInsets.all(16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-              child: Text(
-                'Your day today',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            _buildActivityMetrics(),
-            _buildGoalSection(),
-            _buildActionButtons(),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActivityMetrics() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: IntrinsicHeight(
-        child: Row(
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            Row(
               children: [
-                Text(
-                  '--',
-                  style: TextStyle(
-                    color: Colors.green[700],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 30),
+                const Spacer(),
                 Text(
-                  '--',
+                  'Last updated: ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')} Today',
                   style: TextStyle(
-                    color: Colors.orange[700],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 30),
-                Text(
-                  '--',
-                  style: TextStyle(
-                    color: Colors.blue[700],
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                    color: Colors.grey[600],
+                    fontSize: 13,
                   ),
                 ),
               ],
             ),
-            const SizedBox(width: 10),
-            VerticalDivider(
-              color: Colors.grey[300],
-              thickness: 1,
-              width: 20,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                children: [
-                  _buildActivityItem(
-                    icon: Icons.directions_walk,
-                    title: 'Total steps',
-                    iconColor: Colors.black,
-                  ),
-                  const SizedBox(height: 20),
-                  _buildActivityItem(
-                    icon: Icons.local_fire_department,
-                    title: 'Calories burned',
-                    iconColor: Colors.black,
-                  ),
-                  const SizedBox(height: 20),
-                  _buildActivityItem(
-                    icon: Icons.place,
-                    title: 'Distance walked',
-                    iconColor: Colors.black,
-                  ),
-                ],
+            const SizedBox(height: 8),
+            const Text(
+              'Based on daily goal',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 12,
               ),
             ),
           ],
@@ -292,132 +302,409 @@ class _ActivityScreenState extends State<ActivityScreen> {
     );
   }
 
-  Widget _buildActivityItem({
-    required IconData icon,
-    required String title,
-    required Color iconColor,
-  }) {
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 28,
-          color: iconColor,
+  Widget _buildActivitySummaryCard() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Today\'s Activity',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.indigo,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildActivityItem('Steps', '${_activityData['steps']}', '', Colors.indigo),
+                _buildActivityItem('Calories', '${_activityData['calories']}', 'kcal', Colors.orange),
+                _buildActivityItem('Distance', '${_activityData['distance']}', 'km', Colors.green),
+              ],
+            ),
+          ],
         ),
-        const SizedBox(width: 15),
+      ),
+    );
+  }
+
+  Widget _buildActivityItem(String title, String value, String unit, Color color) {
+    return Column(
+      children: [
         Text(
           title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey[600],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              unit,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWeeklyChart() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Weekly Trends',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.calendar_month, size: 16),
+                  label: const Text('View More'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.indigo,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 200,
+              padding: const EdgeInsets.only(right: 16, top: 16),
+              child: BarChart(
+                BarChartData(
+                  gridData: FlGridData(show: false),
+                  titlesData: FlTitlesData(
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          if (value.toInt() >= 0 && value.toInt() < _weeklyActivity.length) {
+                            return Text(
+                              _weeklyActivity[value.toInt()]['day'],
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 10,
+                              ),
+                            );
+                          }
+                          return const Text('');
+                        },
+                        reservedSize: 22,
+                      ),
+                    ),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          if (value % 2000 == 0 && value <= 10000) {
+                            return Text(
+                              '${value ~/ 1000}k',
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 10,
+                              ),
+                            );
+                          }
+                          return const Text('');
+                        },
+                        reservedSize: 30,
+                      ),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  barGroups: List.generate(_weeklyActivity.length, (index) {
+                    return BarChartGroupData(
+                      x: index,
+                      barRods: [
+                        BarChartRodData(
+                          toY: _weeklyActivity[index]['steps'].toDouble(),
+                          color: DateTime.now().weekday - 1 == index ? Colors.indigo : Colors.indigo.withOpacity(0.6),
+                          width: 15,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(6),
+                            topRight: Radius.circular(6),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                  minY: 0,
+                  maxY: 12000,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildLegendItem('Steps', Colors.indigo),
+                const SizedBox(width: 20),
+                _buildLegendItem('Daily Goal', Colors.amber),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildGoalSection() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Goal: ${_activityData['goal']} steps',
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 15),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildGoalProgressCard() {
+    final double progressPercentage = (_activityData['steps'] / _activityData['goal']).clamp(0.0, 1.0);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '${_activityData['goal']} steps',
-                  style: const TextStyle(
+                const Text(
+                  'Goal Progress',
+                  style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
                   ),
                 ),
-                const Text(
-                  'away from your goal',
+                Text(
+                  '${(_activityData['steps'] / _activityData['goal'] * 100).toInt()}% Complete',
                   style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.black87,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                children: [
+                  FractionallySizedBox(
+                    widthFactor: progressPercentage,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.indigo,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '${_activityData['steps']} steps',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  'Goal: ${_activityData['goal']} steps',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Need ${_activityData['goal'] - _activityData['steps']} more steps to reach your goal',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildActionButtons() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: ElevatedButton.icon(
-        onPressed: () {
-          // Edit Goal functionality
-        },
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.blue[700],
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(5),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () => _addManualActivity(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text(
+                'Add Activity',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
-        ),
-        icon: const Icon(Icons.edit, color: Colors.white),
-        label: const Text(
-          'Edit Goal',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
+          const SizedBox(width: 10),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () {},
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: Colors.indigo),
+                ),
+              ),
+              icon: const Icon(Icons.edit, color: Colors.indigo),
+              label: const Text(
+                'Edit Goal',
+                style: TextStyle(
+                  color: Colors.indigo,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  void _addManualActivity() {
+    // Show a dialog to add activity manually
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Activity'),
+        content: const Text('This feature is coming soon!'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildBottomNavBar() {
     return BottomNavigationBar(
-      currentIndex: 0,
-      selectedItemColor: Colors.blue[700],
+      currentIndex: _selectedIndex,
+      selectedItemColor: Colors.indigo,
       unselectedItemColor: Colors.grey,
       showUnselectedLabels: true,
       type: BottomNavigationBarType.fixed,
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home),
-          label: 'Dashboard',
+          label: 'Home',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.history),
-          label: 'History',
+          icon: Icon(Icons.insert_chart),
+          label: 'Reports',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.notifications),
-          label: 'My Reminders',
+          icon: Icon(Icons.calendar_today),
+          label: 'Calendar',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.person),
-          label: 'Profile',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.more_horiz),
-          label: 'More',
+          icon: Icon(Icons.settings),
+          label: 'Settings',
         ),
       ],
+      onTap: (index) {
+        setState(() {
+          _selectedIndex = index;
+        });
+      },
     );
   }
 }
