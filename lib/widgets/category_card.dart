@@ -9,14 +9,14 @@ class CategoryCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const CategoryCard({
-    Key? key,
+    super.key,
     required this.icon,
     required this.title,
     required this.color,
     required this.iconColor,
     this.textColor,
     this.onTap,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
