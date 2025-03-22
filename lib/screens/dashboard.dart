@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../screens/manual_reading.dart';
 import 'activity.dart';
 import '../screens/diary.dart';
+import '../screens/weight.dart';
 import 'overview.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -193,6 +194,22 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         });
       });
     }
+    else if (_selectedCategory == 'Weight' && !_isNavigating) {
+      _isNavigating = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const WeightEntryScreen()),
+        ).then((_) {
+          setState(() {
+            _selectedCategory = 'Blood Pressure';
+            _isNavigating = false;
+            _tabController.animateTo(0); // Reset tab selection
+          });
+        });
+      });
+    }
+
 
     else if (_selectedCategory == 'Activity' && !_isNavigating) {
       _isNavigating = true;
