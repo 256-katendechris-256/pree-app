@@ -192,7 +192,9 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
           });
         });
       });
-    } else if (_selectedCategory == 'Activity' && !_isNavigating) {
+    }
+
+    else if (_selectedCategory == 'Activity' && !_isNavigating) {
       _isNavigating = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.push(
@@ -206,6 +208,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
           });
         });
       });
+
     }
 
     switch (_selectedCategory) {
