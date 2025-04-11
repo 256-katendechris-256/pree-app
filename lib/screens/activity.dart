@@ -413,7 +413,7 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
               padding: const EdgeInsets.only(right: 16, top: 16),
               child: BarChart(
                 BarChartData(
-                  gridData: FlGridData(show: false),
+                  gridData: const FlGridData(show: false),
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -451,10 +451,10 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
                         reservedSize: 30,
                       ),
                     ),
-                    rightTitles: AxisTitles(
+                    rightTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
-                    topTitles: AxisTitles(
+                    topTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                   ),

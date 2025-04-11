@@ -1,15 +1,18 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:async';
+import '../screens/dashboard.dart';
 import 'user_profile_setup.dart';
 
 class OTPVerificationScreen extends StatefulWidget {
   final String phoneNumber;
+  final String verificationId;
   final bool isNewUser;
 
   const OTPVerificationScreen({
     super.key,
     required this.phoneNumber,
+    required this.verificationId,
     required this.isNewUser,
   });
 
@@ -18,29 +21,25 @@ class OTPVerificationScreen extends StatefulWidget {
 }
 
 class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
-  // Create controllers for each OTP field
-  final TextEditingController _field1 = TextEditingController();
-  final TextEditingController _field2 = TextEditingController();
-  final TextEditingController _field3 = TextEditingController();
-  final TextEditingController _field4 = TextEditingController();
-
-  final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
-
+  final List<TextEditingController> _controllers =
+      List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   int _resendSeconds = 30;
   Timer? _timer;
+  bool _isVerifying = false;
 
   @override
   void initState() {
     super.initState();
     _startResendTimer();
+    _focusNodes[0].requestFocus();
   }
 
   void _startResendTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_resendSeconds > 0) {
-        setState(() {
-          _resendSeconds--;
-        });
+        setState(() => _resendSeconds--);
       } else {
         _timer?.cancel();
       }
@@ -49,49 +48,43 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
 
   @override
   void dispose() {
-    _field1.dispose();
-    _field2.dispose();
-    _field3.dispose();
-    _field4.dispose();
-    for (var node in _focusNodes) {
-      node.dispose();
-    }
+    for (var c in _controllers) c.dispose();
+    for (var f in _focusNodes) f.dispose();
     _timer?.cancel();
     super.dispose();
   }
 
-  void _verifyOTP() {
-    // Combine the OTP fields
-    String enteredOTP = _field1.text + _field2.text + _field3.text + _field4.text;
+  Future<void> _verifyOTP() async {
+    if (_isVerifying) return;
+    setState(() => _isVerifying = true);
 
-    // Check if OTP is valid (in a real app, you'd verify with backend)
-    if (enteredOTP.length == 4) {
-      // For demo, we're assuming "1234" is the valid OTP
-      if (enteredOTP == "1234") {
-        // Navigate to appropriate next screen
-        if (widget.isNewUser) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const UserProfileSetupScreen(),
-            ),
-                (route) => false,
-          );
-        } else {
-          // Navigate to dashboard for existing users
-          Navigator.pushNamedAndRemoveUntil(context, '/dashboard', (route) => false);
-        }
-      } else {
-        // Show error for invalid OTP
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid OTP. Please try again.')),
-        );
-      }
-    } else {
-      // Show error for incomplete OTP
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter all digits of the OTP.')),
+    try {
+      final otp = _controllers.fold('', (prev, c) => prev + c.text);
+      if (otp.length != 6) throw 'Please enter complete OTP';
+
+      final credential = PhoneAuthProvider.credential(
+        verificationId: widget.verificationId,
+        smsCode: otp,
       );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+      
+      if (userCredential.user == null) throw 'Authentication failed';
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => userCredential.additionalUserInfo?.isNewUser ?? false
+              ? const UserProfileSetupScreen()
+              : const DashboardScreen(),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _isVerifying = false);
     }
   }
 
@@ -99,39 +92,24 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Verify Phone',
-          style: TextStyle(
-            color: Colors.black87,
-            fontSize: 18,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const SizedBox(height: 40),
               Text(
-                'Verification Code',
+                'Verify your phone number',
                 style: TextStyle(
                   color: Theme.of(context).primaryColor,
-                  fontSize: 24,
+                  fontSize: 28,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
               Text(
-                'We have sent a verification code to ${widget.phoneNumber}',
+                'Enter the OTP sent to ${widget.phoneNumber}',
                 style: const TextStyle(
                   color: Colors.black54,
                   fontSize: 16,
@@ -139,15 +117,33 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
               ),
               const SizedBox(height: 40),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildOTPField(0, _field1),
-                  _buildOTPField(1, _field2),
-                  _buildOTPField(2, _field3),
-                  _buildOTPField(3, _field4),
-                ],
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(6, (index) => SizedBox(
+                  width: 50,
+                  child: TextField(
+                    controller: _controllers[index],
+                    focusNode: _focusNodes[index],
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    maxLength: 1,
+                    onChanged: (value) {
+                      if (value.length == 1 && index < 5) {
+                        _focusNodes[index + 1].requestFocus();
+                      }
+                      if (value.isEmpty && index > 0) {
+                        _focusNodes[index - 1].requestFocus();
+                      }
+                    },
+                    decoration: InputDecoration(
+                      counterText: '',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                )),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 30),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -156,103 +152,44 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                     backgroundColor: Theme.of(context).primaryColor,
                     padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                      borderRadius: BorderRadius.circular(8)),
                   ),
-                  child: const Text(
-                    'Verify',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  child: _isVerifying
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          'Verify OTP',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Didn\'t receive the code? ',
-                    style: TextStyle(
-                      color: Colors.black54,
-                      fontSize: 14,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: _resendSeconds == 0
-                        ? () {
-                      // Reset the timer and request new OTP
-                      setState(() {
-                        _resendSeconds = 30;
-                      });
-                      _startResendTimer();
-
-                      // Show confirmation
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('New OTP sent!')),
-                      );
-                    }
-                        : null,
-                    child: Text(
-                      _resendSeconds > 0
-                          ? 'Resend in $_resendSeconds s'
-                          : 'Resend',
-                      style: TextStyle(
-                        color: _resendSeconds > 0
-                            ? Colors.grey
-                            : Theme.of(context).primaryColor,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
+              Center(
+                child: _resendSeconds > 0
+                    ? Text(
+                        'Resend OTP in $_resendSeconds seconds',
+                        style: const TextStyle(color: Colors.grey),
+                      )
+                    : GestureDetector(
+                        onTap: () {
+                          setState(() => _resendSeconds = 30);
+                          _startResendTimer();
+                        },
+                        child: Text(
+                          'Resend OTP',
+                          style: TextStyle(
+                            color: Theme.of(context).primaryColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildOTPField(int index, TextEditingController controller) {
-    return Container(
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: TextField(
-        controller: controller,
-        focusNode: _focusNodes[index],
-        textAlign: TextAlign.center,
-        keyboardType: TextInputType.number,
-        maxLength: 1,
-        style: const TextStyle(fontSize: 24),
-        decoration: const InputDecoration(
-          counterText: '',
-          border: InputBorder.none,
-        ),
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-        ],
-        onChanged: (value) {
-          if (value.isNotEmpty) {
-            // Move to next field
-            if (index < 3) {
-              _focusNodes[index + 1].requestFocus();
-            } else {
-              // On last field, hide keyboard
-              FocusManager.instance.primaryFocus?.unfocus();
-            }
-          } else if (value.isEmpty && index > 0) {
-            // Move to previous field on backspace
-            _focusNodes[index - 1].requestFocus();
-          }
-        },
       ),
     );
   }

@@ -1,6 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'otp_verification_screen.dart';
+import 'dart:async';
+import '../screens/dashboard.dart';
+import 'user_profile_setup.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -11,12 +15,71 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
-  bool _isSignUp = false;
+  final bool _isSignUp = false;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  bool _isLoading = false;
 
   @override
   void dispose() {
     _phoneController.dispose();
     super.dispose();
+  }
+
+  Future<void> _verifyPhoneNumber() async {
+    final rawNumber = _phoneController.text.replaceAll(RegExp(r'^0+'), '');
+    if (rawNumber.length != 9) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid 9-digit number')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    final phoneNumber = '+256$rawNumber';
+
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        timeout: const Duration(seconds: 60),
+        verificationCompleted: (credential) async {
+          final userCredential = await _auth.signInWithCredential(credential);
+          _handleNavigation(userCredential);
+        },
+        verificationFailed: (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message ?? 'Verification failed')),
+          );
+        },
+        codeSent: (verificationId, resendToken) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OTPVerificationScreen(
+                phoneNumber: phoneNumber,
+                verificationId: verificationId,
+                isNewUser: _isSignUp,
+              ),
+            ),
+          );
+        },
+        codeAutoRetrievalTimeout: (verificationId) {},
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _handleNavigation(UserCredential credential) {
+    if (credential.user == null) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => credential.additionalUserInfo?.isNewUser ?? false
+            ? const UserProfileSetupScreen()
+            : const DashboardScreen(), // Replace with your HomeScreen
+      ),
+    );
   }
 
   @override
@@ -79,7 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     keyboardType: TextInputType.phone,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(10),
+                      LengthLimitingTextInputFormatter(9),
                     ],
                     decoration: InputDecoration(
                       hintText: 'Enter your phone number',
@@ -113,28 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      // Validate phone number
-                      if (_phoneController.text.length < 10) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Please enter a valid phone number'),
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Navigate to OTP screen
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => OTPVerificationScreen(
-                            phoneNumber: '+256 ${_phoneController.text}',
-                            isNewUser: _isSignUp,
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _isLoading ? null : _verifyPhoneNumber,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).primaryColor,
                       padding: const EdgeInsets.symmetric(vertical: 15),
@@ -142,62 +184,18 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: Text(
-                      _isSignUp ? 'Sign Up' : 'Login',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Text(
+                            _isSignUp ? 'Sign Up' : 'Login',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                   ),
                 ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _isSignUp
-                          ? 'Already have an account?'
-                          : 'Don\'t have an account?',
-                      style: const TextStyle(
-                        color: Colors.black54,
-                        fontSize: 14,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _isSignUp = !_isSignUp;
-                        });
-                      },
-                      child: Text(
-                        _isSignUp ? 'Login' : 'Sign Up',
-                        style: TextStyle(
-                          color: Theme.of(context).primaryColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                if (!_isSignUp)
-                  Center(
-                    child: TextButton(
-                      onPressed: () {
-                        // Handle forgot password
-                      },
-                      child: Text(
-                        'Forgot Password?',
-                        style: TextStyle(
-                          color: Theme.of(context).primaryColor,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),

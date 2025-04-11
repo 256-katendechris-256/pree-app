@@ -197,7 +197,7 @@ class _HealthConditionsScreenState extends State<HealthConditionsScreen> {
     // Navigate to the dashboard screen
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => DashboardScreen()),
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
     );
   }
 }

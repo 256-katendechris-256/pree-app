@@ -1,0 +1,2 @@
+C:/Users/Dell/projects/flutter/pree-app/android/app/.cxx/Debug/4532q155/armeabi-v7a/CMakeFiles/edit_cache.dir
+C:/Users/Dell/projects/flutter/pree-app/android/app/.cxx/Debug/4532q155/armeabi-v7a/CMakeFiles/rebuild_cache.dir

@@ -427,7 +427,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
               padding: const EdgeInsets.only(right: 16, top: 16),
               child: LineChart(
                 LineChartData(
-                  gridData: FlGridData(show: false),
+                  gridData: const FlGridData(show: false),
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -465,10 +465,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                         reservedSize: 30,
                       ),
                     ),
-                    rightTitles: AxisTitles(
+                    rightTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
-                    topTitles: AxisTitles(
+                    topTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                   ),
@@ -483,7 +483,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                       color: Colors.indigo,
                       barWidth: 3,
                       isStrokeCapRound: true,
-                      dotData: FlDotData(show: false),
+                      dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
                         color: Colors.indigo.withOpacity(0.1),
@@ -498,7 +498,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                       color: Colors.blue,
                       barWidth: 3,
                       isStrokeCapRound: true,
-                      dotData: FlDotData(show: false),
+                      dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
                         color: Colors.blue.withOpacity(0.1),
@@ -699,11 +699,11 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
-                  side: BorderSide(color: Colors.indigo),
+                  side: const BorderSide(color: Colors.indigo),
                 ),
               ),
-              icon: Icon(Icons.book, color: Colors.indigo),
-              label: Text(
+              icon: const Icon(Icons.book, color: Colors.indigo),
+              label: const Text(
                 'My Diary',
                 style: TextStyle(
                   color: Colors.indigo,

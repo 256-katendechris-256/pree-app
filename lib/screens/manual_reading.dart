@@ -1,6 +1,8 @@
 // screens/manual_reading_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ManualReadingScreen extends StatefulWidget {
   const ManualReadingScreen({super.key});
@@ -19,7 +21,7 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
   final FocusNode _diastolicFocusNode = FocusNode();
   final FocusNode _pulseFocusNode = FocusNode();
 
-  bool _showNumpad = false; // Initially hide the numpad
+  bool _showNumpad = false;
   String _currentFieldValue = '';
   TextEditingController? _currentController;
   FocusNode? _currentFocusNode;
@@ -27,12 +29,9 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialize with current date and time
     final now = DateTime.now();
     _dateController.text = DateFormat('dd/MM/yyyy').format(now);
     _timeController.text = DateFormat('h:mm a').format(now);
-
-    // Set default values for focus and controllers
     _currentController = _systolicController;
     _currentFocusNode = _systolicFocusNode;
   }
@@ -54,22 +53,19 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
     if (_currentController == null) return;
 
     setState(() {
-      if (value == '⌫') { // Backspace
+      if (value == '⌫') {
         if (_currentFieldValue.isNotEmpty) {
           _currentFieldValue = _currentFieldValue.substring(0, _currentFieldValue.length - 1);
         }
       } else if (value == 'Next') {
-        // Handle next field logic
         if (_currentController == _systolicController) {
           _setFocusToField(_diastolicController, _diastolicFocusNode);
         } else if (_currentController == _diastolicController) {
           _setFocusToField(_pulseController, _pulseFocusNode);
         } else {
-          // Submit form if on the last field
           _saveReading();
         }
       } else {
-        // Only add the number if within reasonable range
         final newValue = _currentFieldValue + value;
         if (int.tryParse(newValue) != null) {
           if (_currentController == _systolicController && int.parse(newValue) <= 250 ||
@@ -79,8 +75,6 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
           }
         }
       }
-
-      // Update the controller text
       _currentController!.text = _currentFieldValue;
     });
   }
@@ -94,8 +88,7 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
     });
   }
 
-  void _saveReading() {
-    // Validation
+  Future<void> _saveReading() async {
     if (_systolicController.text.isEmpty ||
         _diastolicController.text.isEmpty ||
         _pulseController.text.isEmpty) {
@@ -105,14 +98,43 @@ class _ManualReadingScreenState extends State<ManualReadingScreen> {
       return;
     }
 
-    // Return the reading to the previous screen
-    Navigator.pop(context, {
-      'systolic': int.parse(_systolicController.text),
-      'diastolic': int.parse(_diastolicController.text),
-      'pulse': int.parse(_pulseController.text),
-      'date': _dateController.text,
-      'time': _timeController.text,
-    });
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not authenticated')),
+      );
+      return;
+    }
+
+    try {
+      final date = DateFormat('dd/MM/yyyy').parse(_dateController.text);
+      final time = DateFormat('h:mm a').parse(_timeController.text);
+      
+      final DateTime timestamp = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
+
+      await FirebaseFirestore.instance.collection('vital_signs').add({
+        'systolic_BP': int.parse(_systolicController.text),
+        'diastolic': int.parse(_diastolicController.text),
+        'pulse': int.parse(_pulseController.text),
+        'temperature': '',
+        'date': _dateController.text,
+        'time': _timeController.text,
+        'timestamp': Timestamp.fromDate(timestamp),
+        'user_id': user.uid,
+      });
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving reading: $e')),
+      );
+    }
   }
 
   @override
