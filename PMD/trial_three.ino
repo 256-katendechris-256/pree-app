@@ -29,7 +29,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // Button pins
 #define CONFIG_BUTTON_PIN 4  // Button for entering setup mode
 #define SCREEN_TOGGLE_PIN 6  // Button for toggling display on/off (GPIO0)
-// #define DATA_CYCLE_PIN 7     // Button for cycling through data screens (GPIO1)
+#define WIFI_STATUS_LED_PIN 7     // Button for cycling through data screens (GPIO1)
 
 // Access Point settings
 const char* apSSID = "PMD-HealthDevice";
@@ -255,7 +255,8 @@ void setup() {
   // Initialize button pins
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
   pinMode(SCREEN_TOGGLE_PIN, INPUT_PULLUP);
-  // pinMode(DATA_CYCLE_PIN, INPUT_PULLUP);
+  pinMode(WIFI_STATUS_LED_PIN, OUTPUT);
+  digitalWrite(WIFI_STATUS_LED_PIN, LOW);
   
   // Initialize I2C
   Wire.begin();
@@ -316,6 +317,7 @@ void setup() {
     Serial.println("MAX30102 Initialized");
   }
   
+
   // Check if we should enter setup mode (using CONFIG_BUTTON_PIN now)
   if (userId == "" || digitalRead(CONFIG_BUTTON_PIN) == LOW) {
     Serial.println("Entering setup mode...");
@@ -331,14 +333,7 @@ void setup() {
     
     // Initialize time with UTC+3 for Uganda
     configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-    // Serial.println("Waiting for time sync");
-    // time_t now = time(nullptr);
-    // while (now < 8 * 3600 * 2) {
-    //   delay(500);
-    //   Serial.print(".");
-    //   now = time(nullptr);
-    // }
-    // Serial.println("Time synchronized");
+
 
     // In the setup() function where you're initializing time
     Serial.println("Waiting for time sync");
@@ -381,12 +376,14 @@ void setup() {
   displaySleepTime = millis() + DISPLAY_TIMEOUT;
 }
 
-
 void loop() {
   if (setupMode) {
     // Handle DNS and HTTP requests in setup mode
     dnsServer.processNextRequest();
     webServer.handleClient();
+    
+    // Make sure LED is off in setup mode or when display is off
+    digitalWrite(WIFI_STATUS_LED_PIN, LOW);
     
     // Check if CONFIG_BUTTON_PIN is pressed again to exit setup mode
     if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
@@ -445,6 +442,10 @@ void loop() {
       
       // Only perform normal operations if the device is configured
       
+      // Update WiFi status LED based on both connection state AND display state
+      // LED should be on only when both WiFi is connected AND display is on
+      digitalWrite(WIFI_STATUS_LED_PIN, (WiFi.status() == WL_CONNECTED && displayOn) ? HIGH : LOW);
+      
       // Read sensor data at regular intervals
       if (millis() - lastReadingTime >= READING_INTERVAL) {
         readSensorData();
@@ -479,6 +480,8 @@ void loop() {
         displayOn = false;
         display.clearDisplay();
         display.display();
+        // Also turn off the LED when display turns off
+        digitalWrite(WIFI_STATUS_LED_PIN, LOW);
         Serial.println("Display turned off due to inactivity");
       }
     }
@@ -490,6 +493,120 @@ void loop() {
   // Small delay to prevent watchdog issues
   delay(10);
 }
+// void loop() {
+//   if (setupMode) {
+//     // Handle DNS and HTTP requests in setup mode
+//     dnsServer.processNextRequest();
+//     webServer.handleClient();
+    
+//     // Make sure LED is off in setup mode
+//     digitalWrite(WIFI_STATUS_LED_PIN, LOW);
+    
+//     // Check if CONFIG_BUTTON_PIN is pressed again to exit setup mode
+//     if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+//       delay(50); // Debounce
+//       if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+//         // Wait for button release
+//         while (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
+//           delay(10);
+//         }
+        
+//         Serial.println("Setup mode exited by user");
+//         display.clearDisplay();
+//         display.setCursor(0, 0);
+//         display.println("Exiting setup mode...");
+//         display.display();
+//         delay(1000);
+        
+//         setupMode = false;
+//         stopCaptivePortal();
+        
+//         // Connect to WiFi for normal operation if user ID is set
+//         if (!userId.isEmpty()) {
+//           connectToWiFi();
+//           // Initialize time with UTC+3 for Uganda
+//           configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+//         }
+        
+//         // Show normal display
+//         displayStatus();
+//         delay(2000);
+//         currentScreen = 0; // Start with main screen
+//         updateDisplay();
+//       }
+//     }
+    
+//     // Exit setup mode after timeout
+//     if (millis() > setupModeTimeout) {
+//       Serial.println("Setup mode timed out, returning to normal operation");
+//       setupMode = false;
+//       stopCaptivePortal();
+      
+//       // Connect to WiFi for normal operation if a user ID is set
+//       if (!userId.isEmpty()) {
+//         connectToWiFi();
+//         // Initialize time with UTC+3 for Uganda
+//         configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+//       }
+      
+//       displayStatus();
+//     }
+//   } else {
+//     // Normal operation code here
+//     if (!userId.isEmpty()) {
+//       // Check buttons first
+//       checkButtons();
+      
+//       // Only perform normal operations if the device is configured
+      
+//       // Update WiFi status LED based on current connection state
+//       digitalWrite(WIFI_STATUS_LED_PIN, (WiFi.status() == WL_CONNECTED) ? HIGH : LOW);
+      
+//       // Read sensor data at regular intervals
+//       if (millis() - lastReadingTime >= READING_INTERVAL) {
+//         readSensorData();
+//         lastReadingTime = millis();
+        
+//         // Update display if it's on
+//         if (displayOn) {
+//           updateDisplay();
+//         }
+//       }
+      
+//       // Upload data to Firestore at regular intervals
+//       if (WiFi.status() == WL_CONNECTED && (millis() - lastUploadTime >= UPLOAD_INTERVAL)) {
+//         uploadToFirestore();
+//         lastUploadTime = millis();
+//       }
+      
+//       // Fetch BP data from Firebase at regular intervals
+//       if (WiFi.status() == WL_CONNECTED && (millis() - lastFetchTime >= FETCH_INTERVAL)) {
+//         fetchBPDataFromFirebase();
+//         lastFetchTime = millis();
+//       }
+      
+//       // Check if WiFi connection is lost and try to reconnect
+//       if (WiFi.status() != WL_CONNECTED && millis() - lastUploadTime >= 600000) { // Try reconnecting every 10 minutes
+//         Serial.println("WiFi connection lost. Attempting to reconnect...");
+//         connectToWiFi();
+//       }
+      
+//       // Check for display timeout
+//       if (displayOn && millis() > displaySleepTime) {
+//         displayOn = false;
+//         display.clearDisplay();
+//         display.display();
+//         Serial.println("Display turned off due to inactivity");
+//       }
+//     }
+//   }
+  
+//   // Always check for serial commands
+//   checkSerialCommand();
+  
+//   // Small delay to prevent watchdog issues
+//   delay(10);
+// }
 
 
 void checkButtons() {
@@ -598,10 +715,11 @@ void displayMainScreen() {
   display.display();
 }
 
-
-
 void connectToWiFi() {
   Serial.println("Connecting to WiFi...");
+  
+  // Turn off WiFi status LED
+  digitalWrite(WIFI_STATUS_LED_PIN, LOW);
   
   // Check if WiFi credentials are available
   if (wifiSSID.isEmpty()) {
@@ -632,6 +750,11 @@ void connectToWiFi() {
   
   // Connect to WiFi
   WiFi.mode(WIFI_STA);
+  
+  // This ensures the device remembers and auto-connects to known networks
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+  
   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
   
   // Wait for connection with timeout
@@ -650,6 +773,9 @@ void connectToWiFi() {
     Serial.println("\nWiFi connected");
     Serial.println("IP address: " + WiFi.localIP().toString());
     
+    // Turn on WiFi status LED when connected
+    digitalWrite(WIFI_STATUS_LED_PIN, HIGH);
+    
     if (displayOn) {
       display.clearDisplay();
       display.setCursor(0, 0);
@@ -661,6 +787,9 @@ void connectToWiFi() {
     }
   } else {
     Serial.println("\nWiFi connection failed");
+    
+    // Ensure LED is off if connection failed
+    digitalWrite(WIFI_STATUS_LED_PIN, LOW);
     
     if (displayOn) {
       display.clearDisplay();
@@ -677,6 +806,98 @@ void connectToWiFi() {
     }
   }
 }
+
+// void connectToWiFi() {
+//   Serial.println("Connecting to WiFi...");
+  
+//   // Turn off WiFi status LED
+//   digitalWrite(WIFI_STATUS_LED_PIN, LOW);
+  
+//   // Check if WiFi credentials are available
+//   if (wifiSSID.isEmpty()) {
+//     Serial.println("No WiFi credentials set. Cannot connect.");
+    
+//     if (displayOn) {
+//       display.clearDisplay();
+//       display.setCursor(0, 0);
+//       display.println("No WiFi configured");
+//       display.setCursor(0, 20);
+//       display.println("Enter setup mode");
+//       display.setCursor(0, 30);
+//       display.println("to configure WiFi");
+//       display.display();
+//       delay(500);
+//     }
+//     return;
+//   }
+  
+//   if (displayOn) {
+//     display.clearDisplay();
+//     display.setCursor(0, 0);
+//     display.println("Connecting to WiFi");
+//     display.setCursor(0, 20);
+//     display.println(wifiSSID);
+//     display.display();
+//   }
+  
+//   // Connect to WiFi
+//   WiFi.mode(WIFI_STA);
+  
+//   // This ensures the device remembers and auto-connects to known networks
+//   WiFi.setAutoReconnect(true);
+//   WiFi.persistent(true);
+  
+//   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
+  
+//   // Wait for connection with timeout
+//   int attempts = 0;
+//   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+//     delay(500);
+//     Serial.print(".");
+//     if (displayOn) {
+//       display.print(".");
+//       display.display();
+//     }
+//     attempts++;
+//   }
+  
+//   if (WiFi.status() == WL_CONNECTED) {
+//     Serial.println("\nWiFi connected");
+//     Serial.println("IP address: " + WiFi.localIP().toString());
+    
+//     // Turn on WiFi status LED when connected
+//     digitalWrite(WIFI_STATUS_LED_PIN, HIGH);
+    
+//     if (displayOn) {
+//       display.clearDisplay();
+//       display.setCursor(0, 0);
+//       display.println("WiFi connected!");
+//       display.setCursor(0, 20);
+//       display.println("IP: " + WiFi.localIP().toString());
+//       display.display();
+//       delay(500);
+//     }
+//   } else {
+//     Serial.println("\nWiFi connection failed");
+    
+//     // Ensure LED is off if connection failed
+//     digitalWrite(WIFI_STATUS_LED_PIN, LOW);
+    
+//     if (displayOn) {
+//       display.clearDisplay();
+//       display.setCursor(0, 0);
+//       display.println("WiFi connection");
+//       display.setCursor(0, 10);
+//       display.println("failed!");
+//       display.setCursor(0, 30);
+//       display.println("Working in");
+//       display.setCursor(0, 40);
+//       display.println("offline mode");
+//       display.display();
+//       delay(500);
+//     }
+//   }
+// }
 
 
 void readSensorData() {
