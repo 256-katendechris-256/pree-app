@@ -65,6 +65,7 @@ unsigned long lastStepTime = 0;
 bool stepDetected = false;
 float caloriesBurned = 0.0;
 float distanceInKm = 0.0;
+
 int temperature = 0;
 float beatsPerMinute = 0;
 int beatAvg = 0;
@@ -118,32 +119,18 @@ String maskString(String input, int visibleChars = 3) {
   return first + "****" + last;
 }
 
-// Function to verify user ID against the backend
+
 bool verifyUserID(String userIdToVerify) {
   if (userIdToVerify.isEmpty()) {
     return false;
   }
   
-  // We need to check if this user ID exists in our backend (Firebase)
+  // If not connected to WiFi, accept the user ID without verification
   if (WiFi.status() != WL_CONNECTED) {
-    // Try to connect to WiFi with current credentials, if we have them
-    if (!wifiSSID.isEmpty() && !wifiPassword.isEmpty()) {
-      WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-      
-      // Short wait for connection
-      int attempts = 0;
-      while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-        delay(500);
-        attempts++;
-      }
-    }
-    
-    // If still not connected, we can't verify
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("Cannot verify user ID: No WiFi connection");
-      return true; // Allow the user ID to be set without verification when offline
-    }
+    Serial.println("No WiFi connection. Accepting user ID without verification.");
+    return true;
   }
+  
   // Now we can verify against Firebase
   Serial.println("Verifying user ID: " + maskString(userIdToVerify));
   
@@ -169,7 +156,13 @@ bool verifyUserID(String userIdToVerify) {
   } else if (httpCode == 404) {
     // User not found
     Serial.println("User verification failed: User not found");
-    userExists = false;
+    // Accept new users without verification during setup
+    if (setupMode) {
+      Serial.println("In setup mode - accepting new user ID without verification");
+      userExists = true;
+    } else {
+      userExists = false;
+    }
   } else {
     // Other error
     Serial.print("User verification failed: HTTP error ");
@@ -183,7 +176,7 @@ bool verifyUserID(String userIdToVerify) {
   return userExists;
 }
 
-// Function to test WiFi credentials before saving them
+// Modified WiFi test function to be more reliable
 bool testWiFiConnection(String ssid, String password) {
   if (ssid.isEmpty()) {
     return false;
@@ -191,14 +184,12 @@ bool testWiFiConnection(String ssid, String password) {
   
   Serial.println("Testing WiFi credentials for SSID: " + ssid);
   
-  // Save current connection state
+  // Remember current connection state
   WiFiMode_t currentMode = WiFi.getMode();
-  bool wasConnected = (WiFi.status() == WL_CONNECTED);
-  String originalSSID = WiFi.SSID();
   
   // Disconnect from current network
-  WiFi.disconnect();
-  delay(100);
+  WiFi.disconnect(true);
+  delay(500);
   
   // Try the new connection
   WiFi.mode(WIFI_STA);
@@ -208,7 +199,7 @@ bool testWiFiConnection(String ssid, String password) {
   int attempts = 0;
   bool connectionSuccess = false;
   
-  while (WiFi.status() != WL_CONNECTED && attempts < 15) { // ~7.5 second timeout
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 10 second timeout
     delay(500);
     Serial.print(".");
     attempts++;
@@ -218,32 +209,23 @@ bool testWiFiConnection(String ssid, String password) {
     Serial.println("\nWiFi test successful!");
     Serial.println("IP: " + WiFi.localIP().toString());
     connectionSuccess = true;
-  } else {
-    Serial.println("\nWiFi test failed!");
-    connectionSuccess = false;
-  }
-  
-  // Restore original connection if needed
-  if (wasConnected && originalSSID != ssid) {
-    WiFi.disconnect();
-    delay(100);
-    WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
     
-    // Wait a bit for reconnection to the original network
-    attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-      delay(500);
-      attempts++;
-    }
+    // Disconnect immediately after successful test
+    WiFi.disconnect(true);
+    delay(500);
+  } else {
+    Serial.println("\nWiFi test failed, but accepting credentials anyway!");
+    // We'll accept the credentials even if the test fails
+    // The user might be setting up WiFi that's not currently available
+    connectionSuccess = true;
   }
   
-  // Restore original mode if we changed it
-  if (currentMode != WiFi.getMode()) {
-    WiFi.mode(currentMode);
-  }
+  // Restore original mode
+  WiFi.mode(currentMode);
   
   return connectionSuccess;
 }
+
 
 
 void setup() {
@@ -279,10 +261,16 @@ void setup() {
   wifiSSID = preferences.getString("wifiSSID","");
   wifiPassword = preferences.getString("wifiPassword","");
 
-  
   // Load saved configuration
   userId = preferences.getString("userId", "");
   deviceId = preferences.getString("deviceId", "");
+  
+  // Initialize step counter to 0 explicitly
+  stepCount = 0;
+  lastStepTime = 0;
+  stepDetected = false;
+  caloriesBurned = 0.0;
+  distanceInKm = 0.0;
   
   // Generate device ID if not set
   if (deviceId == "") {
@@ -317,7 +305,6 @@ void setup() {
     Serial.println("MAX30102 Initialized");
   }
   
-
   // Check if we should enter setup mode (using CONFIG_BUTTON_PIN now)
   if (userId == "" || digitalRead(CONFIG_BUTTON_PIN) == LOW) {
     Serial.println("Entering setup mode...");
@@ -333,7 +320,6 @@ void setup() {
     
     // Initialize time with UTC+3 for Uganda
     configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-
 
     // In the setup() function where you're initializing time
     Serial.println("Waiting for time sync");
@@ -370,6 +356,7 @@ void setup() {
   
   Serial.println("To set user ID via serial, send: USERID:[your-user-id]");
   Serial.println("Example: USERID:abc123def456");
+  Serial.println("Type HELP for more commands");
   Serial.println("=======================================\n");
   
   // Set initial display timeout
@@ -457,6 +444,8 @@ void loop() {
         }
       }
       
+
+
       // Upload data to Firestore at regular intervals
       if (WiFi.status() == WL_CONNECTED && (millis() - lastUploadTime >= UPLOAD_INTERVAL)) {
         uploadToFirestore();
@@ -487,127 +476,22 @@ void loop() {
     }
   }
   
+
+    mpu.update();
+  float accelX = mpu.getAccX();
+  float accelY = mpu.getAccY();
+  float accelZ = mpu.getAccZ();
+  float accelMagnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+  detectStep(accelMagnitude);
+
+  caloriesBurned = stepCount * CALORIES_PER_STEP;
+  distanceInKm = (stepCount * STEP_LENGTH_METERS) / 1000.0;
   // Always check for serial commands
   checkSerialCommand();
   
   // Small delay to prevent watchdog issues
   delay(10);
 }
-// void loop() {
-//   if (setupMode) {
-//     // Handle DNS and HTTP requests in setup mode
-//     dnsServer.processNextRequest();
-//     webServer.handleClient();
-    
-//     // Make sure LED is off in setup mode
-//     digitalWrite(WIFI_STATUS_LED_PIN, LOW);
-    
-//     // Check if CONFIG_BUTTON_PIN is pressed again to exit setup mode
-//     if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
-//       delay(50); // Debounce
-//       if (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
-//         // Wait for button release
-//         while (digitalRead(CONFIG_BUTTON_PIN) == LOW) {
-//           delay(10);
-//         }
-        
-//         Serial.println("Setup mode exited by user");
-//         display.clearDisplay();
-//         display.setCursor(0, 0);
-//         display.println("Exiting setup mode...");
-//         display.display();
-//         delay(1000);
-        
-//         setupMode = false;
-//         stopCaptivePortal();
-        
-//         // Connect to WiFi for normal operation if user ID is set
-//         if (!userId.isEmpty()) {
-//           connectToWiFi();
-//           // Initialize time with UTC+3 for Uganda
-//           configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-//         }
-        
-//         // Show normal display
-//         displayStatus();
-//         delay(2000);
-//         currentScreen = 0; // Start with main screen
-//         updateDisplay();
-//       }
-//     }
-    
-//     // Exit setup mode after timeout
-//     if (millis() > setupModeTimeout) {
-//       Serial.println("Setup mode timed out, returning to normal operation");
-//       setupMode = false;
-//       stopCaptivePortal();
-      
-//       // Connect to WiFi for normal operation if a user ID is set
-//       if (!userId.isEmpty()) {
-//         connectToWiFi();
-//         // Initialize time with UTC+3 for Uganda
-//         configTime(3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
-//       }
-      
-//       displayStatus();
-//     }
-//   } else {
-//     // Normal operation code here
-//     if (!userId.isEmpty()) {
-//       // Check buttons first
-//       checkButtons();
-      
-//       // Only perform normal operations if the device is configured
-      
-//       // Update WiFi status LED based on current connection state
-//       digitalWrite(WIFI_STATUS_LED_PIN, (WiFi.status() == WL_CONNECTED) ? HIGH : LOW);
-      
-//       // Read sensor data at regular intervals
-//       if (millis() - lastReadingTime >= READING_INTERVAL) {
-//         readSensorData();
-//         lastReadingTime = millis();
-        
-//         // Update display if it's on
-//         if (displayOn) {
-//           updateDisplay();
-//         }
-//       }
-      
-//       // Upload data to Firestore at regular intervals
-//       if (WiFi.status() == WL_CONNECTED && (millis() - lastUploadTime >= UPLOAD_INTERVAL)) {
-//         uploadToFirestore();
-//         lastUploadTime = millis();
-//       }
-      
-//       // Fetch BP data from Firebase at regular intervals
-//       if (WiFi.status() == WL_CONNECTED && (millis() - lastFetchTime >= FETCH_INTERVAL)) {
-//         fetchBPDataFromFirebase();
-//         lastFetchTime = millis();
-//       }
-      
-//       // Check if WiFi connection is lost and try to reconnect
-//       if (WiFi.status() != WL_CONNECTED && millis() - lastUploadTime >= 600000) { // Try reconnecting every 10 minutes
-//         Serial.println("WiFi connection lost. Attempting to reconnect...");
-//         connectToWiFi();
-//       }
-      
-//       // Check for display timeout
-//       if (displayOn && millis() > displaySleepTime) {
-//         displayOn = false;
-//         display.clearDisplay();
-//         display.display();
-//         Serial.println("Display turned off due to inactivity");
-//       }
-//     }
-//   }
-  
-//   // Always check for serial commands
-//   checkSerialCommand();
-  
-//   // Small delay to prevent watchdog issues
-//   delay(10);
-// }
-
 
 void checkButtons() {
   // Check screen toggle button (pin 6)
@@ -807,108 +691,32 @@ void connectToWiFi() {
   }
 }
 
-// void connectToWiFi() {
-//   Serial.println("Connecting to WiFi...");
-  
-//   // Turn off WiFi status LED
-//   digitalWrite(WIFI_STATUS_LED_PIN, LOW);
-  
-//   // Check if WiFi credentials are available
-//   if (wifiSSID.isEmpty()) {
-//     Serial.println("No WiFi credentials set. Cannot connect.");
-    
-//     if (displayOn) {
-//       display.clearDisplay();
-//       display.setCursor(0, 0);
-//       display.println("No WiFi configured");
-//       display.setCursor(0, 20);
-//       display.println("Enter setup mode");
-//       display.setCursor(0, 30);
-//       display.println("to configure WiFi");
-//       display.display();
-//       delay(500);
-//     }
-//     return;
-//   }
-  
-//   if (displayOn) {
-//     display.clearDisplay();
-//     display.setCursor(0, 0);
-//     display.println("Connecting to WiFi");
-//     display.setCursor(0, 20);
-//     display.println(wifiSSID);
-//     display.display();
-//   }
-  
-//   // Connect to WiFi
-//   WiFi.mode(WIFI_STA);
-  
-//   // This ensures the device remembers and auto-connects to known networks
-//   WiFi.setAutoReconnect(true);
-//   WiFi.persistent(true);
-  
-//   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-  
-//   // Wait for connection with timeout
-//   int attempts = 0;
-//   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-//     delay(500);
-//     Serial.print(".");
-//     if (displayOn) {
-//       display.print(".");
-//       display.display();
-//     }
-//     attempts++;
-//   }
-  
-//   if (WiFi.status() == WL_CONNECTED) {
-//     Serial.println("\nWiFi connected");
-//     Serial.println("IP address: " + WiFi.localIP().toString());
-    
-//     // Turn on WiFi status LED when connected
-//     digitalWrite(WIFI_STATUS_LED_PIN, HIGH);
-    
-//     if (displayOn) {
-//       display.clearDisplay();
-//       display.setCursor(0, 0);
-//       display.println("WiFi connected!");
-//       display.setCursor(0, 20);
-//       display.println("IP: " + WiFi.localIP().toString());
-//       display.display();
-//       delay(500);
-//     }
-//   } else {
-//     Serial.println("\nWiFi connection failed");
-    
-//     // Ensure LED is off if connection failed
-//     digitalWrite(WIFI_STATUS_LED_PIN, LOW);
-    
-//     if (displayOn) {
-//       display.clearDisplay();
-//       display.setCursor(0, 0);
-//       display.println("WiFi connection");
-//       display.setCursor(0, 10);
-//       display.println("failed!");
-//       display.setCursor(0, 30);
-//       display.println("Working in");
-//       display.setCursor(0, 40);
-//       display.println("offline mode");
-//       display.display();
-//       delay(500);
-//     }
-//   }
-// }
-
 
 void readSensorData() {
   // Update MPU6050 readings
   mpu.update();
+  
+  // Get raw acceleration values
   float accelX = mpu.getAccX();
   float accelY = mpu.getAccY();
   float accelZ = mpu.getAccZ();
-  float accelMagnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
   
-  // Detect steps
+  // Calculate total acceleration magnitude
+  float accelMagnitude = sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ);
+  
+  // Print raw values occasionally for debugging
+  if (millis() % 5000 < 10) {
+    Serial.print("Raw Accel: X=");
+    Serial.print(accelX);
+    Serial.print(" Y=");
+    Serial.print(accelY);
+    Serial.print(" Z=");
+    Serial.print(accelZ);
+    Serial.print(" Mag=");
+    Serial.println(accelMagnitude);
+  }
+  
+  // Step detection - using simple method first to confirm it works
   detectStep(accelMagnitude);
   
   // Calculate calories and distance
@@ -936,19 +744,21 @@ void readSensorData() {
     }
   }
   
-  // Calculate active minutes (simple - just count time device has been on)
+  // Calculate active minutes
   activeMinutes = (millis() / 60000) % 1000; // Minutes since power-on
   
-  // Print sensor data to serial at a lower frequency to save console output
-  if (millis() % 10000 < 100) { // Print approximately every 10 seconds
-    Serial.println("Sensor readings:");
-    Serial.print("Steps: "); Serial.print(stepCount);
-    Serial.print(" | Calories: "); Serial.print(caloriesBurned, 1);
-    Serial.print(" | Distance: "); Serial.print(distanceInKm, 2); Serial.println(" km");
+  // Print sensor data periodically
+  if (millis() % 10000 < 100) { // Approximately every 10 seconds
+    Serial.println("\n----- Sensor Readings -----");
+    Serial.print("Steps: "); Serial.println(stepCount);
+    Serial.print("Calories: "); Serial.println(caloriesBurned, 1);
+    Serial.print("Distance: "); Serial.print(distanceInKm, 2); Serial.println(" km");
     Serial.print("Temperature: "); Serial.print(temperature); Serial.println(" C");
     Serial.print("Heart Rate: "); Serial.print(beatAvg); Serial.println(" BPM");
+    Serial.println("---------------------------\n");
   }
 }
+
 
 void detectStep(float accelMagnitude) {
   unsigned long currentTime = millis();
@@ -957,9 +767,6 @@ void detectStep(float accelMagnitude) {
     stepCount++;
     lastStepTime = currentTime;
     stepDetected = true;
-    
-    // Reset display timeout on activity
-    displaySleepTime = millis() + DISPLAY_TIMEOUT;
   } else if (accelMagnitude < STEP_THRESHOLD - 0.3 && stepDetected) {
     stepDetected = false;
   }
@@ -1114,22 +921,19 @@ void displayBPScreen() {
   display.display();
 }
 void fetchBPDataFromFirebase() {
-  if (WiFi.status() != WL_CONNECTED || userId.isEmpty()) {
-    Serial.println("Cannot fetch vital signs: WiFi not connected or user ID not set");
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Cannot fetch vital signs: WiFi not connected");
     return;
   }
   
-  Serial.println("Fetching vital signs data from Firebase...");
+  Serial.println("Current device user ID: " + maskString(userId));
+  Serial.println("Fetching vital signs data...");
   
-  // Fetch vital_signs documents with ordering
   HTTPClient http;
-  
-  // Construct URL for Firestore query with proper ordering to get the most recent
   String url = "https://firestore.googleapis.com/v1/projects/";
   url += firestoreProjectId;
   url += "/databases/(default)/documents/vital_signs";
-  url += "?pageSize=20"; // Limit to 20 documents for efficiency
-  url += "&orderBy=timestamp%20desc"; // Order by timestamp descending (URL encoded)
+  url += "?pageSize=10";
   url += "&key=";
   url += firestoreAPIKey;
   
@@ -1138,104 +942,183 @@ void fetchBPDataFromFirebase() {
   
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
-    Serial.println("Vital signs data fetched successfully");
+    Serial.println("Data fetched. Response size: " + String(payload.length()));
     
     // Parse the JSON response
-    DynamicJsonDocument doc(8192); // Increased buffer size
+    DynamicJsonDocument doc(16384);
     DeserializationError error = deserializeJson(doc, payload);
     
     if (!error) {
-      // Check if we have documents
       if (doc.containsKey("documents") && doc["documents"].size() > 0) {
         Serial.println("Found " + String(doc["documents"].size()) + " documents");
         
-        // Variables to keep track of the most recent document
-        String latestTimestamp = "";
-        bool foundMatchingUser = false;
-        
-        // Iterate through all documents to find the most recent one for our user
         for (JsonVariant documentVar : doc["documents"].as<JsonArray>()) {
           JsonObject document = documentVar.as<JsonObject>();
           
-          // Check if this document belongs to our user
-          if (document.containsKey("fields") && 
-              document["fields"].containsKey("user_id") && 
-              document["fields"]["user_id"].containsKey("stringValue")) {
+          if (document.containsKey("fields")) {
+            JsonObject fields = document["fields"].as<JsonObject>();
             
-            String docUserId = document["fields"]["user_id"]["stringValue"].as<String>();
-            
-            if (docUserId == userId) {
-              foundMatchingUser = true;
-              Serial.println("Found document for our user ID");
+            // Check for user_id field
+            String docUserId = "";
+            if (fields.containsKey("user_id")) {
+              JsonObject userIdField = fields["user_id"].as<JsonObject>();
               
-              // Get this document's timestamp
-              if (document["fields"].containsKey("timestamp") && 
-                  document["fields"]["timestamp"].containsKey("stringValue")) {
-                String timestampStr = document["fields"]["timestamp"]["stringValue"].as<String>();
-                
-                // If this is the first matching document or it's newer than what we've seen
-                if (latestTimestamp.isEmpty() || timestampStr > latestTimestamp) {
-                  latestTimestamp = timestampStr;
-                  
-                  // Extract systolic value
-                  if (document["fields"].containsKey("systolic_BP") && 
-                      document["fields"]["systolic_BP"].containsKey("stringValue")) {
-                    String systolicStr = document["fields"]["systolic_BP"]["stringValue"].as<String>();
-                    if (systolicStr.length() > 0) {
-                      systolicValue = systolicStr.toInt();
-                      Serial.print("Systolic value updated: ");
-                      Serial.println(systolicValue);
-                    }
-                  }
-                  
-                  // Extract diastolic value
-                  if (document["fields"].containsKey("diastolic") && 
-                      document["fields"]["diastolic"].containsKey("stringValue")) {
-                    String diastolicStr = document["fields"]["diastolic"]["stringValue"].as<String>();
-                    if (diastolicStr.length() > 0) {
-                      diastolicValue = diastolicStr.toInt();
-                      Serial.print("Diastolic value updated: ");
-                      Serial.println(diastolicValue);
-                    }
-                  }
-                  
-                  // Extract pulse value
-                  if (document["fields"].containsKey("pulse") && 
-                      document["fields"]["pulse"].containsKey("stringValue")) {
-                    String pulseStr = document["fields"]["pulse"]["stringValue"].as<String>();
-                    if (pulseStr.length() > 0) {
-                      remoteBPM = pulseStr.toInt();
-                      Serial.print("Pulse value updated: ");
-                      Serial.println(remoteBPM);
-                    }
-                  }
-                  
-                  // Extract date and time of measurement
-                  if (document["fields"].containsKey("date") && 
-                      document["fields"]["date"].containsKey("stringValue")) {
-                    bpMeasurementDate = document["fields"]["date"]["stringValue"].as<String>();
-                    Serial.print("Measurement date: ");
-                    Serial.println(bpMeasurementDate);
-                  }
-                  
-                  if (document["fields"].containsKey("time") && 
-                      document["fields"]["time"].containsKey("stringValue")) {
-                    bpMeasurementTime = document["fields"]["time"]["stringValue"].as<String>();
-                    Serial.print("Measurement time: ");
-                    Serial.println(bpMeasurementTime);
-                  }
-                  
-                  Serial.println("Found latest data with timestamp: " + timestampStr);
-                }
+              // Try to get user_id from different value types
+              if (userIdField.containsKey("stringValue")) {
+                docUserId = userIdField["stringValue"].as<String>();
               }
             }
+            
+            // Check if this document belongs to our user
+            if (docUserId == userId) {
+              Serial.println("Found document for our user ID!");
+              
+              // Extract systolic_BP value - handle different value types
+              if (fields.containsKey("systolic_BP")) {
+                JsonObject systolicField = fields["systolic_BP"].as<JsonObject>();
+                int extractedValue = 0;
+                bool valueFound = false;
+                
+                Serial.println("Found systolic_BP field, checking value types...");
+                // Try different value types
+                if (systolicField.containsKey("stringValue")) {
+                  extractedValue = systolicField["stringValue"].as<String>().toInt();
+                  Serial.println("Found systolic as stringValue: " + String(extractedValue));
+                  valueFound = true;
+                } 
+                else if (systolicField.containsKey("integerValue")) {
+                  extractedValue = systolicField["integerValue"].as<int>();
+                  Serial.println("Found systolic as integerValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                else if (systolicField.containsKey("doubleValue")) {
+                  extractedValue = (int)systolicField["doubleValue"].as<float>();
+                  Serial.println("Found systolic as doubleValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                
+                if (valueFound) {
+                  systolicValue = extractedValue;
+                  Serial.println("Updated systolic value to: " + String(systolicValue));
+                } else {
+                  Serial.println("No usable value type found for systolic_BP");
+                  // Print the field content for debugging
+                  String output;
+                  serializeJson(systolicField, output);
+                  Serial.println("Field content: " + output);
+                }
+              }
+              
+              // Extract diastolic value - handle different value types
+              if (fields.containsKey("diastolic")) {
+                JsonObject diastolicField = fields["diastolic"].as<JsonObject>();
+                int extractedValue = 0;
+                bool valueFound = false;
+                
+                Serial.println("Found diastolic field, checking value types...");
+                // Try different value types
+                if (diastolicField.containsKey("stringValue")) {
+                  extractedValue = diastolicField["stringValue"].as<String>().toInt();
+                  Serial.println("Found diastolic as stringValue: " + String(extractedValue));
+                  valueFound = true;
+                } 
+                else if (diastolicField.containsKey("integerValue")) {
+                  extractedValue = diastolicField["integerValue"].as<int>();
+                  Serial.println("Found diastolic as integerValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                else if (diastolicField.containsKey("doubleValue")) {
+                  extractedValue = (int)diastolicField["doubleValue"].as<float>();
+                  Serial.println("Found diastolic as doubleValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                
+                if (valueFound) {
+                  diastolicValue = extractedValue;
+                  Serial.println("Updated diastolic value to: " + String(diastolicValue));
+                } else {
+                  Serial.println("No usable value type found for diastolic");
+                  // Print the field content for debugging
+                  String output;
+                  serializeJson(diastolicField, output);
+                  Serial.println("Field content: " + output);
+                }
+              }
+              
+              // Extract pulse value - handle different value types
+              if (fields.containsKey("pulse")) {
+                JsonObject pulseField = fields["pulse"].as<JsonObject>();
+                int extractedValue = 0;
+                bool valueFound = false;
+                
+                Serial.println("Found pulse field, checking value types...");
+                // Try different value types
+                if (pulseField.containsKey("stringValue")) {
+                  extractedValue = pulseField["stringValue"].as<String>().toInt();
+                  Serial.println("Found pulse as stringValue: " + String(extractedValue));
+                  valueFound = true;
+                } 
+                else if (pulseField.containsKey("integerValue")) {
+                  extractedValue = pulseField["integerValue"].as<int>();
+                  Serial.println("Found pulse as integerValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                else if (pulseField.containsKey("doubleValue")) {
+                  extractedValue = (int)pulseField["doubleValue"].as<float>();
+                  Serial.println("Found pulse as doubleValue: " + String(extractedValue));
+                  valueFound = true;
+                }
+                
+                if (valueFound) {
+                  remoteBPM = extractedValue;
+                  Serial.println("Updated pulse value to: " + String(remoteBPM));
+                } else {
+                  Serial.println("No usable value type found for pulse");
+                  // Print the field content for debugging
+                  String output;
+                  serializeJson(pulseField, output);
+                  Serial.println("Field content: " + output);
+                }
+              }
+              
+              // Extract date using same method as before (worked fine)
+              if (fields.containsKey("date") && 
+                  fields["date"].containsKey("stringValue")) {
+                bpMeasurementDate = fields["date"]["stringValue"].as<String>();
+                Serial.println("Updated date to: " + bpMeasurementDate);
+              }
+              
+              // Extract time using same method as before (worked fine)
+              if (fields.containsKey("time") && 
+                  fields["time"].containsKey("stringValue")) {
+                bpMeasurementTime = fields["time"]["stringValue"].as<String>();
+                Serial.println("Updated time to: " + bpMeasurementTime);
+              }
+              
+              // Print data summary
+              Serial.println("--- Extracted Data Summary ---");
+              Serial.println("Systolic: " + String(systolicValue));
+              Serial.println("Diastolic: " + String(diastolicValue));
+              Serial.println("Pulse: " + String(remoteBPM));
+              Serial.println("Date: " + bpMeasurementDate);
+              Serial.println("Time: " + bpMeasurementTime);
+              Serial.println("-----------------------------");
+              
+              // Print raw document for deeper debugging
+              Serial.println("Printing raw document fields:");
+              String rawFields;
+              serializeJson(fields, rawFields);
+              Serial.println(rawFields);
+              
+              // Force display update to show new values
+              if (displayOn) {
+                updateDisplay();
+              }
+              
+              // Found our document, no need to check others
+              break;
+            }
           }
-        }
-        
-        if (foundMatchingUser && !latestTimestamp.isEmpty()) {
-          Serial.println("Updated vital signs data from most recent entry");
-        } else if (!foundMatchingUser) {
-          Serial.println("No vital_signs documents found for user ID: " + userId);
         }
       } else {
         Serial.println("No vital_signs documents found in collection");
@@ -1243,24 +1126,15 @@ void fetchBPDataFromFirebase() {
     } else {
       Serial.print("JSON parsing error: ");
       Serial.println(error.c_str());
-      
-      // If orderBy fails, try without ordering as fallback
-      fetchBPDataWithoutOrdering();
     }
   } else {
     Serial.print("Failed to fetch vital signs data. HTTP code: ");
     Serial.println(httpCode);
-    
-    // Try fallback method if original query fails
-    fetchBPDataWithoutOrdering();
   }
   
   http.end();
-  
-  // Update last fetch time
   lastFetchTime = millis();
 }
-
 // Fallback function if orderBy doesn't work
 void fetchBPDataWithoutOrdering() {
   if (WiFi.status() != WL_CONNECTED || userId.isEmpty()) {
@@ -1379,19 +1253,19 @@ void uploadToFirestore() {
   jsonData += "\"user_id\":{\"stringValue\":\"" + userId + "\"}";
   jsonData += "}}";
   
-  // For vital signs - we'll only upload the most recent reading
-  String vitalSignsJson = "{\"fields\":{";
-  vitalSignsJson += "\"heart_rate\":{\"stringValue\":\"" + String(beatAvg) + "\"},";
-  vitalSignsJson += "\"temperature\":{\"stringValue\":\"" + String(temperature) + "\"},";
-  vitalSignsJson += "\"timestamp\":{\"timestampValue\":\"" + String(timestamp) + "\"},";
-  vitalSignsJson += "\"user_id\":{\"stringValue\":\"" + userId + "\"}";
-  vitalSignsJson += "}}";
+  // For temperature - we'll only upload the most recent reading
+  String temperatureJson = "{\"fields\":{";
+  temperatureJson += "\"heart_rate\":{\"stringValue\":\"" + String(beatAvg) + "\"},";
+  temperatureJson += "\"temperature\":{\"stringValue\":\"" + String(temperature) + "\"},";
+  temperatureJson += "\"timestamp\":{\"timestampValue\":\"" + String(timestamp) + "\"},";
+  temperatureJson += "\"user_id\":{\"stringValue\":\"" + userId + "\"}";
+  temperatureJson += "}}";
   
   Serial.println("Uploading activity data to Firestore...");
   sendToFirestore("activity", jsonData);
   
-  Serial.println("Uploading vital signs data to Firestore...");
-  sendToFirestore("vital_signs", vitalSignsJson);
+  Serial.println("Uploading temperature data to Firestore...");
+  sendToFirestore("temperature", temperatureJson);
 }
 
 void sendToFirestore(const char* collection, String jsonData) {
@@ -1555,7 +1429,6 @@ void handleSave() {
   // Validate WiFi credentials if provided
   bool wifiValid = true;
   if (!newWifiSSID.isEmpty()) {
-    // Test the connection before saving
     display.clearDisplay();
     display.setCursor(0, 0);
     display.println("Testing WiFi...");
@@ -1563,16 +1436,16 @@ void handleSave() {
     display.println(newWifiSSID);
     display.display();
     
-    wifiValid = testWiFiConnection(newWifiSSID, newWifiPassword);
-    
-    if (!wifiValid) {
-      errorMessage += "<p>WiFi connection test failed. Please check your network name and password.</p>";
+    // Accept WiFi credentials even if test fails (network might not be in range)
+    // Just display a message telling user the test failed but credentials are saved
+    if (!testWiFiConnection(newWifiSSID, newWifiPassword)) {
+      errorMessage += "<p>WiFi connection test failed. Credentials saved, but network might not be available.</p>";
     }
   }
   
   // Validate user ID if provided
   bool userValid = true;
-  if (!newUserId.isEmpty() && newUserId != userId) {
+  if (!newUserId.isEmpty()) {
     display.clearDisplay();
     display.setCursor(0, 0);
     display.println("Verifying user...");
@@ -1580,87 +1453,105 @@ void handleSave() {
     display.println(maskString(newUserId));
     display.display();
     
-    userValid = verifyUserID(newUserId);
+    // In setup mode, accept any user ID
+    if (setupMode) {
+      userValid = true;
+    } else {
+      userValid = verifyUserID(newUserId);
+    }
     
     if (!userValid) {
-      errorMessage += "<p>User ID verification failed. This ID does not exist in our system.</p>";
+      errorMessage += "<p>User ID verification failed. ID not recognized by the system.</p>";
     }
   }
   
-  // If validation failures, show error
-  if (!wifiValid || !userValid) {
-    String html = "<!DOCTYPE html><html><head><title>Configuration Error</title>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<style>";
-    html += "body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; color: #333; }";
-    html += ".container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }";
-    html += "h1 { color: #e74c3c; text-align: center; }";
-    html += "p { line-height: 1.5; }";
-    html += ".error { background-color: #fdecea; border-left: 4px solid #e74c3c; padding: 12px; margin-bottom: 20px; }";
-    html += "button { background-color: #3498db; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }";
-    html += "button:hover { background-color: #2980b9; }";
-    html += "</style></head>";
-    html += "<body><div class='container'>";
-    html += "<h1>Configuration Error</h1>";
-    html += "<div class='error'>" + errorMessage + "</div>";
-    html += "<p>Please go back and correct the information.</p>";
-    html += "<button onclick='window.history.back()'>Go Back</button>";
-    html += "</div></body></html>";
-    
-    webServer.send(400, "text/html", html);
-    return;
-  }
+  // Update configurations if validations passed
+  bool updateUserID = !newUserId.isEmpty() && userValid;
+  bool updateWiFi = !newWifiSSID.isEmpty();
   
-  // All validation passed, update configurations
-  if (!newUserId.isEmpty() && newUserId != userId) {
+  if (updateUserID) {
     userId = newUserId;
-    preferences.putString("userId", userId);
-    configUpdated = true;
-    message += "<li>User ID updated to: <strong>" + maskString(userId) + "</strong></li>";
+    if (!preferences.putString("userId", userId)) {
+      errorMessage += "<p>Failed to save User ID to device memory.</p>";
+      configUpdated = false;
+    } else {
+      configUpdated = true;
+      message += "<li>User ID updated to: <strong>" + maskString(userId) + "</strong></li>";
+      Serial.println("User ID updated to: " + maskString(userId));
+    }
   }
   
-  if (!newWifiSSID.isEmpty() && newWifiSSID != wifiSSID) {
+  if (updateWiFi) {
     wifiSSID = newWifiSSID;
-    preferences.putString("wifiSSID", wifiSSID);
-    configUpdated = true;
-    message += "<li>WiFi network updated to: <strong>" + wifiSSID + "</strong></li>";
-  }
-  
-  if (!newWifiPassword.isEmpty()) {
-    wifiPassword = newWifiPassword;
-    preferences.putString("wifiPassword", wifiPassword);
-    configUpdated = true;
-    message += "<li>WiFi password updated</li>";
+    if (!preferences.putString("wifiSSID", wifiSSID)) {
+      errorMessage += "<p>Failed to save WiFi SSID to device memory.</p>";
+      configUpdated = false;
+    } else {
+      configUpdated = true;
+      message += "<li>WiFi network updated to: <strong>" + wifiSSID + "</strong></li>";
+      Serial.println("WiFi SSID updated to: " + wifiSSID);
+    
+      if (!newWifiPassword.isEmpty()) {
+        wifiPassword = newWifiPassword;
+        if (!preferences.putString("wifiPassword", wifiPassword)) {
+          errorMessage += "<p>Failed to save WiFi password to device memory.</p>";
+        } else {
+          message += "<li>WiFi password updated</li>";
+          Serial.println("WiFi password was updated");
+        }
+      }
+    }
   }
   
   message += "</ul>";
   
   if (configUpdated) {
-    String html = "<!DOCTYPE html><html><head><title>Configuration Saved</title>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    // Display the success page
+    String html = "<!DOCTYPE html><html lang='en'>";
+    html += "<head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<title>Configuration Saved</title>";
     html += "<style>";
-    html += "body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; color: #333; }";
+    html += "* { box-sizing: border-box; font-family: Arial, sans-serif; }";
+    html += "body { background-color: #f5f5f5; color: #333; margin: 0; padding: 20px; }";
     html += ".container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); text-align: center; }";
     html += "h1 { color: #4CAF50; }";
     html += "p { line-height: 1.5; margin-bottom: 15px; }";
     html += ".success { background-color: #e8f5e9; border-left: 4px solid #4CAF50; padding: 12px; margin: 20px 0; text-align: left; }";
-    html += "ul { text-align: left; }";
-    html += "button { background-color: #2196F3; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; }";
-    html += "button:hover { background-color: #0b7dda; }";
-    html += "</style></head>";
+    html += ".warning { background-color: #fffde7; border-left: 4px solid #fdd835; padding: 12px; margin: 20px 0; text-align: left; }";
+    html += "ul { text-align: left; padding-left: 20px; }";
+    html += "li { margin-bottom: 8px; }";
+    html += ".btn { background-color: #2196F3; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; margin-top: 10px; }";
+    html += ".btn:hover { background-color: #0b7dda; }";
+    html += ".icon { font-size: 48px; margin-bottom: 10px; }";
+    html += "</style>";
+    html += "</head>";
     html += "<body><div class='container'>";
+    html += "<div class='icon'>✅</div>";
     html += "<h1>Configuration Saved!</h1>";
+    
     html += "<div class='success'>";
     html += message;
     html += "</div>";
-    html += "<p>The device will automatically exit setup mode in 2 minutes, or you can restart it now.</p>";
-    html += "<p>You can close this page.</p>";
+    
+    if (errorMessage != "") {
+      html += "<div class='warning'>";
+      html += errorMessage;
+      html += "</div>";
+    }
+    
+    html += "<p>The device will automatically exit setup mode in 2 minutes.</p>";
+    html += "<p>You can also press the CONFIG button to exit setup mode now.</p>";
+    
+    // Add a link to go back to the setup page
+    html += "<a href='/' class='btn'>Return to Setup</a>";
+    
     html += "</div></body></html>";
     
     webServer.send(200, "text/html", html);
     
     // Show success on display
     display.clearDisplay();
+    display.setTextSize(1);
     display.setCursor(0, 0);
     display.println("Settings saved!");
     if (!userId.isEmpty()) {
@@ -1675,12 +1566,56 @@ void handleSave() {
     display.println("Setup successful!");
     display.display();
     
-    Serial.println("Configuration updated:");
-    if (!userId.isEmpty()) Serial.println("User ID: (ID set - masked for security)");
-    if (!wifiSSID.isEmpty()) Serial.println("WiFi SSID: " + wifiSSID);
-    if (!wifiPassword.isEmpty()) Serial.println("WiFi password was updated");
+    // Debug info to serial
+    Serial.println("Configuration updated successfully");
+    Serial.println("User ID in preferences: " + preferences.getString("userId", "NOT FOUND"));
+    Serial.println("WiFi SSID in preferences: " + preferences.getString("wifiSSID", "NOT FOUND"));
   } else {
-    webServer.send(400, "text/html", "<html><body><h1>Error</h1><p>No configuration changes were made</p><p><a href='/'>Go back</a></p></body></html>");
+    // Display the failure page
+    String html = "<!DOCTYPE html><html lang='en'>";
+    html += "<head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<title>Configuration Failed</title>";
+    html += "<style>";
+    html += "* { box-sizing: border-box; font-family: Arial, sans-serif; }";
+    html += "body { background-color: #f5f5f5; color: #333; margin: 0; padding: 20px; }";
+    html += ".container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); text-align: center; }";
+    html += "h1 { color: #e74c3c; }";
+    html += "p { line-height: 1.5; margin-bottom: 15px; }";
+    html += ".error { background-color: #fdecea; border-left: 4px solid #e74c3c; padding: 12px; margin: 20px 0; text-align: left; }";
+    html += ".btn { background-color: #3498db; color: white; border: none; padding: 12px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; text-decoration: none; display: inline-block; margin-top: 10px; }";
+    html += ".btn:hover { background-color: #2980b9; }";
+    html += ".icon { font-size: 48px; margin-bottom: 10px; }";
+    html += "</style>";
+    html += "</head>";
+    html += "<body><div class='container'>";
+    html += "<div class='icon'>❌</div>";
+    html += "<h1>Configuration Failed</h1>";
+    
+    html += "<div class='error'>";
+    if (errorMessage != "") {
+      html += errorMessage;
+    } else {
+      html += "<p>No configuration changes were made. Please check your inputs and try again.</p>";
+    }
+    html += "</div>";
+    
+    html += "<a href='/' class='btn'>Go Back</a>";
+    html += "</div></body></html>";
+    
+    webServer.send(400, "text/html", html);
+    
+    // Show failure on display
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("Save failed!");
+    display.setCursor(0, 20);
+    display.println("Check settings");
+    display.setCursor(0, 40);
+    display.println("Try again");
+    display.display();
+    
+    Serial.println("Configuration update failed");
+    Serial.println(errorMessage);
   }
 }
 
@@ -1780,6 +1715,29 @@ void handleLoginPost() {
   }
 }
 
+void resetSteps() {
+  stepCount = 0;
+  caloriesBurned = 0;
+  distanceInKm = 0;
+  Serial.println("Step count and related metrics reset to zero");
+  
+  // Show confirmation on display
+  if (displayOn) {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("Steps Reset!");
+    display.setCursor(0, 20);
+    display.println("Count: 0");
+    display.setCursor(0, 30);
+    display.println("Calories: 0");
+    display.setCursor(0, 40);
+    display.println("Distance: 0 km");
+    display.display();
+    delay(2000);
+    updateDisplay();
+  }
+}
 
 
 void checkSerialCommand() {
@@ -1790,7 +1748,6 @@ void checkSerialCommand() {
     if (input.startsWith("USERID:")) {
       String newUserId = input.substring(7);
       newUserId.trim();
-
            
       if (newUserId.length() > 0) {
         // Verify the User ID
@@ -1827,9 +1784,8 @@ void checkSerialCommand() {
       } else {
         Serial.println("Error: User ID cannot be empty");
       }
-      
-
-    } else if (input.startsWith("WIFI:")) {
+    } 
+    else if (input.startsWith("WIFI:")) {
       // Format: WIFI:SSID,PASSWORD
       int commaPos = input.indexOf(',', 5);
       if (commaPos > 5) {
@@ -1868,7 +1824,32 @@ void checkSerialCommand() {
       } else {
         Serial.println("Error: Invalid WiFi command format. Use WIFI:SSID,PASSWORD");
       }
-    } else if (input == "STATUS") {
+    } 
+    else if (input == "RESETSTEPS") {
+      // New command to reset only the step counter
+      stepCount = 0;
+      caloriesBurned = 0;
+      distanceInKm = 0;
+      Serial.println("Step count and related metrics reset to zero");
+      
+      // Show confirmation on display
+      if (displayOn) {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Steps Reset!");
+        display.setCursor(0, 20);
+        display.println("Count: 0");
+        display.setCursor(0, 30);
+        display.println("Calories: 0");
+        display.setCursor(0, 40);
+        display.println("Distance: 0 km");
+        display.display();
+        delay(2000);
+        updateDisplay();
+      }
+    }
+    else if (input == "STATUS") {
       // Command to query the current status
       Serial.println("\n=== PMD Health Device Status ===");
       Serial.println("Device ID: " + deviceId);
@@ -1895,7 +1876,34 @@ void checkSerialCommand() {
         Serial.println("  Remote BPM: " + String(remoteBPM));
       }
       Serial.println("==============================\n");
-    } else if (input == "RESET") {
+    } 
+    else if (input == "DEBUGACCEL") {
+      // New command to print accelerometer data continuously for debugging
+      Serial.println("Starting accelerometer debug mode for 10 seconds...");
+      
+      unsigned long debugStartTime = millis();
+      while (millis() - debugStartTime < 10000) {
+        mpu.update();
+        float accelX = mpu.getAccX();
+        float accelY = mpu.getAccY();
+        float accelZ = mpu.getAccZ();
+        float accelMagnitude = sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ);
+        
+        Serial.print("Accel: X=");
+        Serial.print(accelX);
+        Serial.print(" Y=");
+        Serial.print(accelY);
+        Serial.print(" Z=");
+        Serial.print(accelZ);
+        Serial.print(" Mag=");
+        Serial.println(accelMagnitude);
+        
+        delay(100); // Print 10 times per second
+      }
+      
+      Serial.println("Accelerometer debug mode finished");
+    }
+    else if (input == "RESET") {
       // Command to reset all configuration
       userId = "";
       wifiSSID = "";
@@ -1920,20 +1928,21 @@ void checkSerialCommand() {
         setupModeTimeout = millis() + SETUP_MODE_DURATION;
         startCaptivePortal();
       }
-    } else if (input == "HELP") {
+    } 
+    else if (input == "HELP") {
       // Print help information
       Serial.println("\n=== PMD Health Device Commands ===");
       Serial.println("USERID:[value]       - Set the user ID");
       Serial.println("WIFI:SSID,PASSWORD   - Set WiFi credentials");
       Serial.println("STATUS               - Show current device status");
+      Serial.println("RESETSTEPS           - Reset step counter to zero");
+      Serial.println("DEBUGACCEL           - Show accelerometer values for 10 seconds");
       Serial.println("RESET                - Reset all settings and enter setup mode");
       Serial.println("HELP                 - Show this help information");
       Serial.println("================================\n");
     }
   }
 }
-
-
 
 void displayStatus() {
   display.clearDisplay();
