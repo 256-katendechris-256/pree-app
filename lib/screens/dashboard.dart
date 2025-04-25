@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import '../screens/manual_reading.dart';
-import 'activity.dart';
+import '../screens/manual_reading_weight.dart';
+import '../screens/activity.dart';
 import '../screens/diary.dart';
-import 'overview.dart';
+import '../screens/overview.dart';
+import '../screens/weight.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -16,27 +21,41 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   int _selectedIndex = 0;
   String _selectedCategory = 'Blood Pressure';
   bool _isNavigating = false;
+  bool _isLoading = true;
   late TabController _tabController;
 
+  // Firebase instances
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   // Weekly blood pressure data
-  final List<Map<String, dynamic>> _weeklyReadings = [
-    {'day': 'Mon', 'systolic': 122, 'diastolic': 78},
-    {'day': 'Tue', 'systolic': 119, 'diastolic': 76},
-    {'day': 'Wed', 'systolic': 121, 'diastolic': 75},
-    {'day': 'Thu', 'systolic': 118, 'diastolic': 74},
-    {'day': 'Fri', 'systolic': 120, 'diastolic': 77},
-    {'day': 'Sat', 'systolic': 117, 'diastolic': 75},
-    {'day': 'Sun', 'systolic': 119, 'diastolic': 76},
-  ];
+  List<Map<String, dynamic>> _weeklyReadings = [];
 
   // Current reading
   Map<String, dynamic> _latestReading = {
-    'systolic': 119,
-    'diastolic': 76,
-    'pulse': 68,
-    'status': 'Optimal',
+    'systolic': 0,
+    'diastolic': 0,
+    'pulse': 0,
+    'status': 'Loading...',
     'timestamp': '8:22 AM',
     'date': 'Today'
+  };
+
+  // Activity data
+  Map<String, dynamic> _activityData = {
+    'steps': 0,
+    'calories': 0,
+    'distance': 0.0,
+    'active_minutes': 0,
+  };
+
+  // Weight data
+  Map<String, dynamic> _weightData = {
+    'weight': 0.0,
+    'bmi': 0.0,
+    'status': '',
+    'change': '',
+    'date': DateTime.now(),
   };
 
   @override
@@ -66,6 +85,269 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         });
       }
     });
+
+    // Load data from Firebase
+    _loadFirebaseData();
+  }
+
+  Future<void> _loadFirebaseData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Get current user
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        // Handle not logged in state
+        _loadMockData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in to view your data')),
+        );
+        return;
+      }
+
+      String userId = currentUser.uid;
+
+      // Load vital signs data
+      await _loadVitalSignsData(userId);
+
+      // Load activity data
+      await _loadActivityData(userId);
+
+      // Load weight data
+      await _loadWeightData(userId);
+
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading data: $e');
+      _loadMockData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadVitalSignsData(String userId) async {
+    try {
+      // Get latest vital signs reading
+      var latestReadingDoc = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (latestReadingDoc.docs.isNotEmpty) {
+        var data = latestReadingDoc.docs.first.data();
+        
+        // Extract values with proper null handling
+        int systolic = data['systolic_BP'] ?? 0;
+        int diastolic = data['diastolic'] ?? 0;
+        int pulse = data['pulse'] ?? 0;
+        String time = data['time'] ?? '8:22 AM';
+        String date = data['date'] ?? 'Today';
+        
+        // Calculate status
+        String status = _calculateStatus(systolic, diastolic);
+        
+        if (mounted) {
+          setState(() {
+            _latestReading = {
+              'systolic': systolic,
+              'diastolic': diastolic,
+              'pulse': pulse,
+              'status': status,
+              'timestamp': time,
+              'date': date,
+            };
+          });
+        }
+      }
+
+      // Get last 7 days of readings for chart
+      var weeklyReadingsDoc = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(7)
+          .get();
+
+      if (weeklyReadingsDoc.docs.isNotEmpty) {
+        List<Map<String, dynamic>> readings = [];
+        
+        for (var doc in weeklyReadingsDoc.docs) {
+          var data = doc.data();
+          
+          // Extract date from timestamp for day display
+          Timestamp timestamp = data['timestamp'];
+          DateTime date = timestamp.toDate();
+          String day = DateFormat('E').format(date); // Day of week abbreviation
+          
+          readings.add({
+            'day': day,
+            'systolic': data['systolic_BP'] ?? 0,
+            'diastolic': data['diastolic'] ?? 0,
+            'timestamp': timestamp,
+          });
+        }
+        
+        // Sort by timestamp ascending for chart display
+        readings.sort((a, b) {
+          Timestamp aTime = a['timestamp'];
+          Timestamp bTime = b['timestamp'];
+          return aTime.compareTo(bTime);
+        });
+        
+        if (mounted) {
+          setState(() {
+            _weeklyReadings = readings;
+          });
+        }
+      } else {
+        // Use mock data if no readings found
+        if (mounted) {
+          setState(() {
+            _weeklyReadings = [
+              {'day': 'Mon', 'systolic': 122, 'diastolic': 78},
+              {'day': 'Tue', 'systolic': 119, 'diastolic': 76},
+              {'day': 'Wed', 'systolic': 121, 'diastolic': 75},
+              {'day': 'Thu', 'systolic': 118, 'diastolic': 74},
+              {'day': 'Fri', 'systolic': 120, 'diastolic': 77},
+              {'day': 'Sat', 'systolic': 117, 'diastolic': 75},
+              {'day': 'Sun', 'systolic': 119, 'diastolic': 76},
+            ];
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading vital signs: $e');
+      throw e;
+    }
+  }
+
+  Future<void> _loadActivityData(String userId) async {
+    try {
+      // Get latest activity data
+      var latestActivityDoc = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (latestActivityDoc.docs.isNotEmpty) {
+        var data = latestActivityDoc.docs.first.data();
+        
+        // Parse values, handling potential string values
+        int steps = int.tryParse(data['steps'] ?? '0') ?? 0;
+        int calories = int.tryParse(data['calories'] ?? '0') ?? 0;
+        double distance = double.tryParse(data['distance'] ?? '0.0') ?? 0.0;
+        int activeMinutes = int.tryParse(data['active_minutes'] ?? '0') ?? 0;
+        
+        if (mounted) {
+          setState(() {
+            _activityData = {
+              'steps': steps,
+              'calories': calories,
+              'distance': distance,
+              'active_minutes': activeMinutes,
+            };
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading activity data: $e');
+      throw e;
+    }
+  }
+
+  Future<void> _loadWeightData(String userId) async {
+    try {
+      // Get latest weight data
+      var latestWeightDoc = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (latestWeightDoc.docs.isNotEmpty) {
+        var data = latestWeightDoc.docs.first.data();
+        
+        // Parse values with proper handling
+        double weight = double.tryParse(data['weight'] ?? '0.0') ?? 0.0;
+        double bmi = double.tryParse(data['current'] ?? '0.0') ?? 0.0;
+        String status = data['status'] ?? 'Unknown';
+        String change = data['change'] ?? '+0.0';
+        Timestamp timestamp = data['timestamp'];
+        
+        if (mounted) {
+          setState(() {
+            _weightData = {
+              'weight': weight,
+              'bmi': bmi,
+              'status': status,
+              'change': change,
+              'date': timestamp.toDate(),
+            };
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading weight data: $e');
+      throw e;
+    }
+  }
+
+  void _loadMockData() {
+    if (mounted) {
+      setState(() {
+        // Mock BP data
+        _latestReading = {
+          'systolic': 119,
+          'diastolic': 76,
+          'pulse': 68,
+          'status': 'Optimal',
+          'timestamp': '8:22 AM',
+          'date': 'Today'
+        };
+        
+        _weeklyReadings = [
+          {'day': 'Mon', 'systolic': 122, 'diastolic': 78},
+          {'day': 'Tue', 'systolic': 119, 'diastolic': 76},
+          {'day': 'Wed', 'systolic': 121, 'diastolic': 75},
+          {'day': 'Thu', 'systolic': 118, 'diastolic': 74},
+          {'day': 'Fri', 'systolic': 120, 'diastolic': 77},
+          {'day': 'Sat', 'systolic': 117, 'diastolic': 75},
+          {'day': 'Sun', 'systolic': 119, 'diastolic': 76},
+        ];
+        
+        // Mock activity data
+        _activityData = {
+          'steps': 7358,
+          'calories': 345,
+          'distance': 4.6,
+          'active_minutes': 35,
+        };
+        
+        // Mock weight data
+        _weightData = {
+          'weight': 75.5,
+          'bmi': 24.2,
+          'status': 'Normal',
+          'change': '-0.3',
+          'date': DateTime.now(),
+        };
+        
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -97,6 +379,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: () {
+              _loadFirebaseData();
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Syncing data...'))
               );
@@ -108,17 +391,63 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         children: [
           _buildCategoryTabs(),
           Expanded(
-            child: _getContentForSelectedCategory(),
+            child: _isLoading 
+              ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
+              : _getContentForSelectedCategory(),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.indigo,
-        onPressed: () => _addNewReading(),
+        onPressed: () => _addNewEntry(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       bottomNavigationBar: _buildBottomNavBar(),
     );
+  }
+
+  // Handle different add actions based on selected category
+  void _addNewEntry() {
+    switch (_selectedCategory) {
+      case 'Blood Pressure':
+        _addNewReading();
+        break;
+      case 'Weight':
+        _addNewWeight();
+        break;
+      case 'Activity':
+        // Would implement manual activity entry
+        break;
+      default:
+        _addNewReading();
+    }
+  }
+
+  void _addNewWeight() async {
+    try {
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in to add weight data')),
+        );
+        return;
+      }
+
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const ManualWeightScreen()),
+      );
+
+      if (result == true) {
+        // Refresh data when returning from weight screen
+        _loadWeightData(currentUser.uid);
+      }
+    } catch (e) {
+      print('Error adding weight: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding weight: $e')),
+      );
+    }
   }
 
   Widget _buildCategoryTabs() {
@@ -205,10 +534,27 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
             _selectedCategory = 'Blood Pressure';
             _isNavigating = false;
             _tabController.animateTo(0); // Reset tab selection
+            _loadFirebaseData(); // Refresh data when returning
           });
         });
       });
-
+    }
+    
+    else if (_selectedCategory == 'Weight' && !_isNavigating) {
+      _isNavigating = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const WeightScreen()),
+        ).then((_) {
+          setState(() {
+            _selectedCategory = 'Blood Pressure';
+            _isNavigating = false;
+            _tabController.animateTo(0); // Reset tab selection
+            _loadFirebaseData(); // Refresh data when returning
+          });
+        });
+      });
     }
 
     switch (_selectedCategory) {
@@ -218,21 +564,21 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         return Container(
           color: Colors.white,
           child: const Center(
-            child: Text('Loading Activity Screen...'),
+            child: CircularProgressIndicator(color: Colors.indigo),
           ),
         );
       case 'Overview':
         return Container(
           color: Colors.white,
           child: const Center(
-            child: Text('Loading Overview Screen...'),
+            child: CircularProgressIndicator(color: Colors.indigo),
           ),
         );
       case 'Weight':
         return Container(
           color: Colors.white,
           child: const Center(
-            child: Text('Weight Screen is under development'),
+            child: CircularProgressIndicator(color: Colors.indigo),
           ),
         );
       default:
@@ -425,90 +771,92 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
             Container(
               height: 200,
               padding: const EdgeInsets.only(right: 16, top: 16),
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 && value.toInt() < _weeklyReadings.length) {
-                            return Text(
-                              _weeklyReadings[value.toInt()]['day'],
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 10,
-                              ),
-                            );
-                          }
-                          return const Text('');
-                        },
-                        reservedSize: 22,
+              child: _weeklyReadings.isEmpty 
+                ? const Center(child: Text('No data available'))
+                : LineChart(
+                  LineChartData(
+                    gridData: const FlGridData(show: false),
+                    titlesData: FlTitlesData(
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            if (value.toInt() >= 0 && value.toInt() < _weeklyReadings.length) {
+                              return Text(
+                                _weeklyReadings[value.toInt()]['day'],
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 10,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                          reservedSize: 22,
+                        ),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            if (value % 20 == 0) {
+                              return Text(
+                                '${value.toInt()}',
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 10,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                          reservedSize: 30,
+                        ),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
                       ),
                     ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value % 20 == 0) {
-                            return Text(
-                              '${value.toInt()}',
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 10,
-                              ),
-                            );
-                          }
-                          return const Text('');
-                        },
-                        reservedSize: 30,
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      // Systolic line
+                      LineChartBarData(
+                        spots: List.generate(_weeklyReadings.length, (index) {
+                          return FlSpot(index.toDouble(), _weeklyReadings[index]['systolic'].toDouble());
+                        }),
+                        isCurved: true,
+                        color: Colors.indigo,
+                        barWidth: 3,
+                        isStrokeCapRound: true,
+                        dotData: const FlDotData(show: false),
+                        belowBarData: BarAreaData(
+                          show: true,
+                          color: Colors.indigo.withOpacity(0.1),
+                        ),
                       ),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
+                      // Diastolic line
+                      LineChartBarData(
+                        spots: List.generate(_weeklyReadings.length, (index) {
+                          return FlSpot(index.toDouble(), _weeklyReadings[index]['diastolic'].toDouble());
+                        }),
+                        isCurved: true,
+                        color: Colors.blue,
+                        barWidth: 3,
+                        isStrokeCapRound: true,
+                        dotData: const FlDotData(show: false),
+                        belowBarData: BarAreaData(
+                          show: true,
+                          color: Colors.blue.withOpacity(0.1),
+                        ),
+                      ),
+                    ],
+                    minY: 60,
+                    maxY: 140,
                   ),
-                  borderData: FlBorderData(show: false),
-                  lineBarsData: [
-                    // Systolic line
-                    LineChartBarData(
-                      spots: List.generate(_weeklyReadings.length, (index) {
-                        return FlSpot(index.toDouble(), _weeklyReadings[index]['systolic'].toDouble());
-                      }),
-                      isCurved: true,
-                      color: Colors.indigo,
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      dotData: const FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: Colors.indigo.withOpacity(0.1),
-                      ),
-                    ),
-                    // Diastolic line
-                    LineChartBarData(
-                      spots: List.generate(_weeklyReadings.length, (index) {
-                        return FlSpot(index.toDouble(), _weeklyReadings[index]['diastolic'].toDouble());
-                      }),
-                      isCurved: true,
-                      color: Colors.blue,
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      dotData: const FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: Colors.blue.withOpacity(0.1),
-                      ),
-                    ),
-                  ],
-                  minY: 60,
-                  maxY: 140,
                 ),
-              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -718,25 +1066,65 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   }
 
   void _addNewReading() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const ManualReadingScreen()),
-    );
+    try {
+      // Check if user is authenticated
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in to add readings')),
+        );
+        return;
+      }
+      
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const ManualReadingScreen()),
+      );
 
-    if (result != null && result is Map<String, dynamic>) {
-      setState(() {
-        _latestReading = {
-          'systolic': result['systolic'],
+      if (result != null && result is Map<String, dynamic>) {
+        // Calculate status
+        String status = _calculateStatus(result['systolic'], result['diastolic']);
+        
+        // Get current date and time formatted
+        final now = DateTime.now();
+        final dateStr = DateFormat('dd/MM/yyyy').format(now);
+        final timeStr = DateFormat('h:mm a').format(now);
+        
+        // Create Firestore document
+        await _firestore.collection('vital_signs').add({
+          'systolic_BP': result['systolic'],
           'diastolic': result['diastolic'],
           'pulse': result['pulse'],
-          'status': _calculateStatus(result['systolic'], result['diastolic']),
-          'timestamp': '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')} ${DateTime.now().hour < 12 ? 'AM' : 'PM'}',
-          'date': 'Today'
-        };
-      });
+          'temperature': '',
+          'date': dateStr,
+          'time': timeStr,
+          'timestamp': now,
+          'user_id': currentUser.uid,
+        });
 
+        // Update local state
+        setState(() {
+          _latestReading = {
+            'systolic': result['systolic'],
+            'diastolic': result['diastolic'],
+            'pulse': result['pulse'],
+            'status': status,
+            'timestamp': timeStr,
+            'date': 'Today'
+          };
+        });
+        
+        // Refresh data to update weekly chart
+        _loadVitalSignsData(currentUser.uid);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Reading saved successfully')),
+        );
+      }
+    } catch (e) {
+      print('Error adding reading: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reading saved successfully')),
+        SnackBar(content: Text('Error saving reading: $e')),
       );
     }
   }

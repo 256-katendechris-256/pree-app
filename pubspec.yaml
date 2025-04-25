@@ -26,6 +26,7 @@ dependencies:
   firebase_core: ^2.24.2
   firebase_auth: ^4.16.0
   cloud_firestore: ^4.14.0
+  google_sign_in: ^6.3.0
   
   # Utilities
   dartz: ^0.10.1
@@ -40,6 +41,7 @@ dependencies:
   # Additional Useful Packages
   cached_network_image: ^3.3.1
   shared_preferences: ^2.2.2
+  table_calendar: ^3.0.9
   
 dev_dependencies:
   flutter_test:
@@ -60,9 +62,9 @@ flutter:
   uses-material-design: true
 
   # Uncomment and configure assets when needed
-  # assets:
-  #   - assets/images/
-  #   - assets/icons/
+  assets:
+    - assets/images/
+    - assets/icons/
 
   # Uncomment and configure fonts when needed
   # fonts:

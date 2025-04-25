@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/dashboard.dart';
-
 
 class HealthConditionsScreen extends StatefulWidget {
   final int pregnancyCount;
@@ -19,6 +20,13 @@ class HealthConditionsScreen extends StatefulWidget {
 }
 
 class _HealthConditionsScreenState extends State<HealthConditionsScreen> {
+  // Firebase instances
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Loading state
+  bool _isLoading = false;
+  
   // List of health conditions to select from
   final List<String> _healthConditions = [
     'Diabetes',
@@ -153,10 +161,7 @@ class _HealthConditionsScreenState extends State<HealthConditionsScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    // Handle submission logic here
-                    _submitHealthData();
-                  },
+                  onPressed: _isLoading ? null : _submitHealthData,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).primaryColor,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -164,14 +169,16 @@ class _HealthConditionsScreenState extends State<HealthConditionsScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  child: const Text(
-                    'Submit',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white,
-                    ),
-                  ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          'Submit',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -182,22 +189,91 @@ class _HealthConditionsScreenState extends State<HealthConditionsScreen> {
   }
 
   // Function to handle data submission
-  void _submitHealthData() {
-    // Collect all user inputs
-    final Map<String, dynamic> userData = {
-      'pregnancyCount': widget.pregnancyCount,
-      'isCurrentlyPregnant': widget.isCurrentlyPregnant,
-      'hasHadHypertension': widget.hasHadHypertension,
-      'healthConditions': _selectedConditions.toList(),
-    };
+  Future<void> _submitHealthData() async {
+    // Check if any condition is selected
+    if (_selectedConditions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one health condition'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
-    // For now, just print the collected data
-    print('User Data: $userData');
+    setState(() {
+      _isLoading = true;
+    });
 
-    // Navigate to the dashboard screen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const DashboardScreen()),
-    );
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
+
+      // Get the user document reference
+      final userRef = _firestore.collection('user').doc(user.uid);
+
+      // Create health data to save
+      final healthData = {
+        'pregnancy_count': widget.pregnancyCount,
+        'is_currently_pregnant': widget.isCurrentlyPregnant,
+        'has_had_hypertension': widget.hasHadHypertension,
+      };
+
+      // Save pregnancy and hypertension data to user document
+      await userRef.update(healthData);
+
+      // Create a batch to save all health conditions
+      final batch = _firestore.batch();
+      
+      // Reference to user's health_condition subcollection
+      final healthConditionCollection = userRef.collection('health_condition');
+      
+      // First delete any existing health conditions
+      final existingConditions = await healthConditionCollection.get();
+      
+      for (var doc in existingConditions.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // Then add new health conditions
+      for (var condition in _selectedConditions) {
+        // Skip "None of the above" to prevent saving it as an actual condition
+        if (condition == 'None of the above') continue;
+
+        final conditionRef = healthConditionCollection.doc();
+        batch.set(conditionRef, {
+          'condition': condition,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      }
+      
+      // Commit the batch
+      await batch.commit();
+
+      // Navigate to the dashboard screen
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const DashboardScreen()),
+          (route) => false, // This removes all previous routes from the stack
+        );
+      }
+    } catch (e) {
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving health data: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 }

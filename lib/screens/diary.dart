@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MyDiaryScreen extends StatefulWidget {
   const MyDiaryScreen({super.key});
@@ -8,11 +10,30 @@ class MyDiaryScreen extends StatefulWidget {
 }
 
 class _MyDiaryScreenState extends State<MyDiaryScreen> {
-  // Selected tab index
-  int _selectedTabIndex = 1; // Default to "My Symptoms"
+  // Firebase instances
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // Selected tab index - default to "My Symptoms" since notes tab is removed
+  int _selectedTabIndex = 0; 
+  bool _isLoading = false;
 
-  // Selected symptoms
+  // Selected symptoms and consumption items
   final Set<String> _selectedSymptoms = {};
+  final Set<String> _selectedConsumptionItems = {};
+  
+  // For custom symptom or consumption item
+  final TextEditingController _customSymptomController = TextEditingController();
+  final TextEditingController _customConsumptionController = TextEditingController();
+  final TextEditingController _symptomDetailsController = TextEditingController();
+
+  @override
+  void dispose() {
+    _customSymptomController.dispose();
+    _customConsumptionController.dispose();
+    _symptomDetailsController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,14 +66,16 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
         automaticallyImplyLeading: false,
         elevation: 0,
       ),
-      body: Column(
-        children: [
-          _buildTabBar(),
-          Expanded(
-            child: _buildTabContent(),
-          ),
-        ],
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _buildTabBar(),
+                Expanded(
+                  child: _buildTabContent(),
+                ),
+              ],
+            ),
       bottomNavigationBar: _buildBottomBar(),
     );
   }
@@ -65,9 +88,8 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
       ),
       child: Row(
         children: [
-          _buildTabItem('Notes', 0),
-          _buildTabItem('My Symptoms', 1),
-          _buildTabItem('What I Consumed', 2),
+          _buildTabItem('My Symptoms', 0),
+          _buildTabItem('What I Consumed', 1),
         ],
       ),
     );
@@ -107,27 +129,12 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
   Widget _buildTabContent() {
     switch (_selectedTabIndex) {
       case 0:
-        return _buildNotesTab();
-      case 1:
         return _buildSymptomsTab();
-      case 2:
+      case 1:
         return _buildConsumptionTab();
       default:
         return _buildSymptomsTab();
     }
-  }
-
-  Widget _buildNotesTab() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: const TextField(
-        maxLines: 10,
-        decoration: InputDecoration(
-          hintText: 'Write your notes here...',
-          border: OutlineInputBorder(),
-        ),
-      ),
-    );
   }
 
   Widget _buildSymptomsTab() {
@@ -147,22 +154,40 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'You have not noted any discomfort today',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 14,
-                ),
-              ),
-            ),
+            _selectedSymptoms.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'You have not noted any discomfort today',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 14,
+                      ),
+                    ),
+                  )
+                : Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _selectedSymptoms.map((symptom) {
+                      return Chip(
+                        label: Text(symptom),
+                        deleteIcon: const Icon(Icons.close, size: 18),
+                        onDeleted: () {
+                          setState(() {
+                            _selectedSymptoms.remove(symptom);
+                          });
+                        },
+                        backgroundColor: Colors.blue[50],
+                        labelStyle: const TextStyle(color: Colors.blue),
+                      );
+                    }).toList(),
+                  ),
             const SizedBox(height: 24),
             const Text(
               'Are you experiencing any of these today?',
@@ -174,6 +199,33 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
             ),
             const SizedBox(height: 16),
             _buildSymptomGrid(),
+            const SizedBox(height: 20),
+            
+            if (_selectedSymptoms.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text(
+                'Add details about your symptoms:',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF2D4356),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _symptomDetailsController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Describe your symptoms in more detail...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(4),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  contentPadding: const EdgeInsets.all(12),
+                ),
+              ),
+            ],
+            
             const SizedBox(height: 20),
             _buildAddSymptomButton(),
           ],
@@ -254,7 +306,18 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
   Widget _buildAddSymptomButton() {
     return TextButton.icon(
       onPressed: () {
-        // Handle add symptom logic
+        _showAddCustomItemDialog(
+          title: 'Add Custom Symptom',
+          hint: 'Enter symptom name',
+          controller: _customSymptomController,
+          onAdd: (value) {
+            if (value.isNotEmpty) {
+              setState(() {
+                _selectedSymptoms.add(value);
+              });
+            }
+          },
+        );
       },
       icon: const Icon(
         Icons.add_circle_outline,
@@ -306,22 +369,40 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'You have not recorded any items yet',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 14,
-                ),
-              ),
-            ),
+            _selectedConsumptionItems.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'You have not recorded any items yet',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 14,
+                      ),
+                    ),
+                  )
+                : Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _selectedConsumptionItems.map((item) {
+                      return Chip(
+                        label: Text(item),
+                        deleteIcon: const Icon(Icons.close, size: 18),
+                        onDeleted: () {
+                          setState(() {
+                            _selectedConsumptionItems.remove(item);
+                          });
+                        },
+                        backgroundColor: Colors.blue[50],
+                        labelStyle: const TextStyle(color: Colors.blue),
+                      );
+                    }).toList(),
+                  ),
             const SizedBox(height: 24),
             const Text(
               'Options',
@@ -365,30 +446,46 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
       itemCount: consumptionOptions.length,
       itemBuilder: (context, index) {
         final option = consumptionOptions[index];
+        final isSelected = _selectedConsumptionItems.contains(option['name']);
 
-        return Container(
-          decoration: BoxDecoration(
-            color: Colors.blue[50],
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                option['icon'] as IconData,
-                color: Colors.blue,
-                size: 30,
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              if (isSelected) {
+                _selectedConsumptionItems.remove(option['name']);
+              } else {
+                _selectedConsumptionItems.add(option['name'] as String);
+              }
+            });
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: isSelected ? Colors.blue : Colors.blue[50]!,
+                width: 1,
               ),
-              const SizedBox(height: 8),
-              Text(
-                option['name'] as String,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  option['icon'] as IconData,
                   color: Colors.blue,
-                  fontSize: 14,
+                  size: 30,
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                Text(
+                  option['name'] as String,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.blue,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -399,7 +496,18 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
     return Center(
       child: TextButton.icon(
         onPressed: () {
-          // Handle add item logic
+          _showAddCustomItemDialog(
+            title: 'Add Custom Item',
+            hint: 'Enter item name',
+            controller: _customConsumptionController,
+            onAdd: (value) {
+              if (value.isNotEmpty) {
+                setState(() {
+                  _selectedConsumptionItems.add(value);
+                });
+              }
+            },
+          );
         },
         icon: const Icon(
           Icons.add_circle_outline,
@@ -417,15 +525,13 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
       ),
     );
   }
+
   Widget _buildBottomBar() {
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
         child: ElevatedButton(
-          onPressed: () {
-            // Save diary entry and return to previous screen
-            Navigator.pop(context);
-          },
+          onPressed: _isLoading ? null : _saveDiaryEntries,
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF7BCAAC), // Light green color from image
             elevation: 0,
@@ -435,16 +541,139 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
             ),
             minimumSize: const Size(double.infinity, 50),
           ),
-          child: const Text(
-            'Save',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          child: _isLoading
+              ? const CircularProgressIndicator(color: Colors.white)
+              : const Text(
+                  'Save',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
         ),
       ),
     );
+  }
+
+  // Show dialog to add a custom symptom or consumption item
+  void _showAddCustomItemDialog({
+    required String title,
+    required String hint,
+    required TextEditingController controller,
+    required Function(String) onAdd,
+  }) {
+    controller.clear();
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: const OutlineInputBorder(),
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                onAdd(controller.text.trim());
+                Navigator.pop(context);
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Save diary entries to Firebase
+  Future<void> _saveDiaryEntries() async {
+    // Validate if there's something to save
+    if (_selectedSymptoms.isEmpty && _selectedConsumptionItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one symptom or consumption item'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
+
+      final batch = _firestore.batch();
+
+      // Save symptoms if any are selected
+      if (_selectedSymptoms.isNotEmpty) {
+        for (var symptom in _selectedSymptoms) {
+          final symptomsRef = _firestore.collection('symptoms').doc();
+          batch.set(symptomsRef, {
+            'symptom': symptom,
+            'symptom_details': _symptomDetailsController.text.trim(),
+            'timestamp': FieldValue.serverTimestamp(),
+            'user_id': user.uid,
+          });
+        }
+      }
+
+      // Save consumption items if any are selected
+      if (_selectedConsumptionItems.isNotEmpty) {
+        for (var item in _selectedConsumptionItems) {
+          final consumptionRef = _firestore.collection('consumption').doc();
+          batch.set(consumptionRef, {
+            'stuff_consumed': item,
+            'timestamp': FieldValue.serverTimestamp(),
+            'user_id': user.uid,
+          });
+        }
+      }
+
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Diary entries saved successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving diary entries: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 }

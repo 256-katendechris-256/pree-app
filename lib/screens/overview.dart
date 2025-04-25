@@ -64,6 +64,24 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
     super.dispose();
   }
   
+  // Helper method to safely parse integers from various data types
+  int _parseIntFromDynamic(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    if (value is double) return value.toInt();
+    return 0;
+  }
+  
+  // Helper method to safely parse doubles from various data types
+  double _parseDoubleFromDynamic(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+  
   Future<void> _loadUserHealthData() async {
     setState(() {
       _isLoading = true;
@@ -92,280 +110,310 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
       });
       
       // Show error to user
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load health data: $e'))
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load health data: $e'))
+        );
+      }
     }
   }
   
   Future<void> _loadBloodPressureData() async {
-    // Query vital_signs collection sorted by timestamp
-    final QuerySnapshot vitalSignsSnapshot = await _firestore
-        .collection('vital_signs')
-        .where('user_id', isEqualTo: _userId)
-        .orderBy('timestamp', descending: true)
-        .limit(10)
-        .get();
-    
-    if (vitalSignsSnapshot.docs.isEmpty) {
-      return;
-    }
-    
-    // Process vitals to determine morning and evening readings
-    List<Map<String, dynamic>> morningReadings = [];
-    List<Map<String, dynamic>> eveningReadings = [];
-    
-    for (var doc in vitalSignsSnapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final timeStr = data['time'] as String? ?? '';
+    try {
+      // Query vital_signs collection sorted by timestamp
+      final QuerySnapshot vitalSignsSnapshot = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(10)
+          .get();
       
-      // Parse time to determine if morning or evening
-      if (timeStr.contains('AM') || (timeStr.isNotEmpty && (int.tryParse(timeStr.split(':')[0]) ?? 0) < 12)) {
-        morningReadings.add(data);
-      } else {
-        eveningReadings.add(data);
+      if (vitalSignsSnapshot.docs.isEmpty) {
+        return;
       }
+      
+      // Process vitals to determine morning and evening readings
+      List<Map<String, dynamic>> morningReadings = [];
+      List<Map<String, dynamic>> eveningReadings = [];
+      
+      for (var doc in vitalSignsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timeStr = data['time'] as String? ?? '';
+        
+        // Parse time to determine if morning or evening
+        if (timeStr.contains('AM') || (timeStr.isNotEmpty && (int.tryParse(timeStr.split(':')[0]) ?? 0) < 12)) {
+          morningReadings.add(data);
+        } else {
+          eveningReadings.add(data);
+        }
+      }
+      
+      // Calculate averages with safe parsing
+      int morningAvgSys = 0;
+      int morningAvgDia = 0;
+      int eveningAvgSys = 0;
+      int eveningAvgDia = 0;
+      
+      if (morningReadings.isNotEmpty) {
+        int sysSum = morningReadings.map((e) => _parseIntFromDynamic(e['systolic_BP'])).reduce((a, b) => a + b);
+        int diaSum = morningReadings.map((e) => _parseIntFromDynamic(e['diastolic'])).reduce((a, b) => a + b);
+        morningAvgSys = sysSum ~/ morningReadings.length;
+        morningAvgDia = diaSum ~/ morningReadings.length;
+      }
+      
+      if (eveningReadings.isNotEmpty) {
+        int sysSum = eveningReadings.map((e) => _parseIntFromDynamic(e['systolic_BP'])).reduce((a, b) => a + b);
+        int diaSum = eveningReadings.map((e) => _parseIntFromDynamic(e['diastolic'])).reduce((a, b) => a + b);
+        eveningAvgSys = sysSum ~/ eveningReadings.length;
+        eveningAvgDia = diaSum ~/ eveningReadings.length;
+      }
+      
+      // Determine BP status
+      String bpStatus = 'Normal';
+      final avgSys = (morningAvgSys + eveningAvgSys) ~/ (morningAvgSys > 0 && eveningAvgSys > 0 ? 2 : 1);
+      final avgDia = (morningAvgDia + eveningAvgDia) ~/ (morningAvgDia > 0 && eveningAvgDia > 0 ? 2 : 1);
+      
+      if (avgSys < 120 && avgDia < 80) {
+        bpStatus = 'Optimal';
+      } else if ((avgSys >= 120 && avgSys <= 129) && avgDia < 80) {
+        bpStatus = 'Elevated';
+      } else if ((avgSys >= 130 && avgSys <= 139) || (avgDia >= 80 && avgDia <= 89)) {
+        bpStatus = 'Stage 1';
+      } else if (avgSys >= 140 || avgDia >= 90) {
+        bpStatus = 'Stage 2';
+      }
+      
+      // Update health data
+      if (mounted) {
+        setState(() {
+          _healthData['bloodPressure'] = {
+            'morningAvgSys': morningAvgSys > 0 ? morningAvgSys : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['systolic_BP']),
+            'morningAvgDia': morningAvgDia > 0 ? morningAvgDia : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['diastolic']),
+            'eveningAvgSys': eveningAvgSys > 0 ? eveningAvgSys : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['systolic_BP']),
+            'eveningAvgDia': eveningAvgDia > 0 ? eveningAvgDia : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['diastolic']),
+            'status': bpStatus,
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading blood pressure data: $e');
     }
-    
-    // Calculate averages
-    int morningAvgSys = 0;
-    int morningAvgDia = 0;
-    int eveningAvgSys = 0;
-    int eveningAvgDia = 0;
-    
-    if (morningReadings.isNotEmpty) {
-      morningAvgSys = morningReadings.map((e) => e['systolic_BP'] as int? ?? 0).reduce((a, b) => a + b) ~/ morningReadings.length;
-      morningAvgDia = morningReadings.map((e) => e['diastolic'] as int? ?? 0).reduce((a, b) => a + b) ~/ morningReadings.length;
-    }
-    
-    if (eveningReadings.isNotEmpty) {
-      eveningAvgSys = eveningReadings.map((e) => e['systolic_BP'] as int? ?? 0).reduce((a, b) => a + b) ~/ eveningReadings.length;
-      eveningAvgDia = eveningReadings.map((e) => e['diastolic'] as int? ?? 0).reduce((a, b) => a + b) ~/ eveningReadings.length;
-    }
-    
-    // Determine BP status
-    String bpStatus = 'Normal';
-    final avgSys = (morningAvgSys + eveningAvgSys) ~/ (morningAvgSys > 0 && eveningAvgSys > 0 ? 2 : 1);
-    final avgDia = (morningAvgDia + eveningAvgDia) ~/ (morningAvgDia > 0 && eveningAvgDia > 0 ? 2 : 1);
-    
-    if (avgSys < 120 && avgDia < 80) {
-      bpStatus = 'Optimal';
-    } else if ((avgSys >= 120 && avgSys <= 129) && avgDia < 80) {
-      bpStatus = 'Elevated';
-    } else if ((avgSys >= 130 && avgSys <= 139) || (avgDia >= 80 && avgDia <= 89)) {
-      bpStatus = 'Stage 1';
-    } else if (avgSys >= 140 || avgDia >= 90) {
-      bpStatus = 'Stage 2';
-    }
-    
-    // Update health data
-    setState(() {
-      _healthData['bloodPressure'] = {
-        'morningAvgSys': morningAvgSys > 0 ? morningAvgSys : vitalSignsSnapshot.docs.first['systolic_BP'] ?? 0,
-        'morningAvgDia': morningAvgDia > 0 ? morningAvgDia : vitalSignsSnapshot.docs.first['diastolic'] ?? 0,
-        'eveningAvgSys': eveningAvgSys > 0 ? eveningAvgSys : vitalSignsSnapshot.docs.first['systolic_BP'] ?? 0,
-        'eveningAvgDia': eveningAvgDia > 0 ? eveningAvgDia : vitalSignsSnapshot.docs.first['diastolic'] ?? 0,
-        'status': bpStatus,
-      };
-    });
   }
   
   Future<void> _loadActivityData() async {
-    // Get the latest activity data
-    final QuerySnapshot activitySnapshot = await _firestore
-        .collection('activity')
-        .where('user_id', isEqualTo: _userId)
-        .orderBy('timestamp', descending: true)
-        .limit(1)
-        .get();
-    
-    if (activitySnapshot.docs.isEmpty) {
-      return;
+    try {
+      // Get the latest activity data
+      final QuerySnapshot activitySnapshot = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+      
+      if (activitySnapshot.docs.isEmpty) {
+        return;
+      }
+      
+      final activityData = activitySnapshot.docs.first.data() as Map<String, dynamic>;
+      
+      // Update activity data with safe parsing
+      if (mounted) {
+        setState(() {
+          _healthData['activity'] = {
+            'steps': _parseIntFromDynamic(activityData['steps']),
+            'distance': _parseDoubleFromDynamic(activityData['distance']),
+            'calories': _parseIntFromDynamic(activityData['calories']),
+            'activeMinutes': _parseIntFromDynamic(activityData['active_minutes']),
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading activity data: $e');
     }
-    
-    final activityData = activitySnapshot.docs.first.data() as Map<String, dynamic>;
-    
-    // Update activity data
-    setState(() {
-      _healthData['activity'] = {
-        'steps': int.tryParse(activityData['steps'] ?? '0') ?? 0,
-        'distance': double.tryParse(activityData['distance'] ?? '0') ?? 0,
-        'calories': int.tryParse(activityData['calories'] ?? '0') ?? 0,
-        'activeMinutes': int.tryParse(activityData['active_minutes'] ?? '0') ?? 0,
-      };
-    });
   }
   
   Future<void> _loadWeightData() async {
-    // Get the latest weight data
-    final QuerySnapshot weightSnapshot = await _firestore
-        .collection('weight')
-        .where('user_id', isEqualTo: _userId)
-        .orderBy('timestamp', descending: true)
-        .limit(2) // Get current and previous for change calculation
-        .get();
-    
-    if (weightSnapshot.docs.isEmpty) {
-      return;
-    }
-    
-    final currentWeightData = weightSnapshot.docs.first.data() as Map<String, dynamic>;
-    double currentWeight = double.tryParse(currentWeightData['current'] ?? '0') ?? 0;
-    double bmi = double.tryParse(currentWeightData['bmi'] ?? '0') ?? 0;
-    
-    // Calculate change if we have previous data
-    double change = 0;
-    if (weightSnapshot.docs.length > 1) {
-      final previousWeightData = weightSnapshot.docs[1].data() as Map<String, dynamic>;
-      double previousWeight = double.tryParse(previousWeightData['current'] ?? '0') ?? 0;
-      if (previousWeight > 0) {
-        change = currentWeight - previousWeight;
+    try {
+      // Get the latest weight data
+      final QuerySnapshot weightSnapshot = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(2) // Get current and previous for change calculation
+          .get();
+      
+      if (weightSnapshot.docs.isEmpty) {
+        return;
       }
+      
+      final currentWeightData = weightSnapshot.docs.first.data() as Map<String, dynamic>;
+      double currentWeight = _parseDoubleFromDynamic(currentWeightData['current']);
+      double bmi = _parseDoubleFromDynamic(currentWeightData['bmi']);
+      
+      // Calculate change if we have previous data
+      double change = 0;
+      if (weightSnapshot.docs.length > 1) {
+        final previousWeightData = weightSnapshot.docs[1].data() as Map<String, dynamic>;
+        double previousWeight = _parseDoubleFromDynamic(previousWeightData['current']);
+        if (previousWeight > 0) {
+          change = currentWeight - previousWeight;
+        }
+      }
+      
+      // Determine weight status based on BMI
+      String weightStatus = 'Normal';
+      if (bmi < 18.5) {
+        weightStatus = 'Underweight';
+      } else if (bmi >= 18.5 && bmi < 25) {
+        weightStatus = 'Normal';
+      } else if (bmi >= 25 && bmi < 30) {
+        weightStatus = 'Overweight';
+      } else if (bmi >= 30) {
+        weightStatus = 'Obese';
+      }
+      
+      // Update weight data
+      if (mounted) {
+        setState(() {
+          _healthData['weight'] = {
+            'current': currentWeight,
+            'change': change,
+            'bmi': bmi,
+            'status': weightStatus,
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading weight data: $e');
     }
-    
-    // Determine weight status based on BMI
-    String weightStatus = 'Normal';
-    if (bmi < 18.5) {
-      weightStatus = 'Underweight';
-    } else if (bmi >= 18.5 && bmi < 25) {
-      weightStatus = 'Normal';
-    } else if (bmi >= 25 && bmi < 30) {
-      weightStatus = 'Overweight';
-    } else if (bmi >= 30) {
-      weightStatus = 'Obese';
-    }
-    
-    // Update weight data
-    setState(() {
-      _healthData['weight'] = {
-        'current': currentWeight,
-        'change': change,
-        'bmi': bmi,
-        'status': weightStatus,
-      };
-    });
   }
   
   Future<void> _loadWeeklyTrends() async {
-  final DateTime now = DateTime.now();
-  final DateTime sevenDaysAgo = now.subtract(const Duration(days: 7));
+    try {
+      final DateTime now = DateTime.now();
+      final DateTime sevenDaysAgo = now.subtract(const Duration(days: 7));
 
-  // Query snapshots
-  final vitalSignsSnapshot = await _firestore
-      .collection('vital_signs')
-      .where('user_id', isEqualTo: _userId)
-      .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
-      .where('timestamp', isLessThan: Timestamp.fromDate(now))
-      .orderBy('timestamp', descending: true)
-      .get();
+      // Query snapshots
+      final vitalSignsSnapshot = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
 
-  final activitySnapshot = await _firestore
-      .collection('activity')
-      .where('user_id', isEqualTo: _userId)
-      .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
-      .where('timestamp', isLessThan: Timestamp.fromDate(now))
-      .orderBy('timestamp', descending: true)
-      .get();
+      final activitySnapshot = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
 
-  final weightSnapshot = await _firestore
-      .collection('weight')
-      .where('user_id', isEqualTo: _userId)
-      .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
-      .where('timestamp', isLessThan: Timestamp.fromDate(now))
-      .orderBy('timestamp', descending: true)
-      .get();
+      final weightSnapshot = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
 
-  // Create map for aggregation
-  Map<String, Map<String, dynamic>> dailyData = {};
-  List<String> dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      // Create map for aggregation
+      Map<String, Map<String, dynamic>> dailyData = {};
+      List<String> dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  for (int i = 0; i < 7; i++) {
-    final date = now.subtract(Duration(days: 6 - i));
-    final dayStr = DateFormat('E').format(date);
+      for (int i = 0; i < 7; i++) {
+        final date = now.subtract(Duration(days: 6 - i));
+        final dayStr = DateFormat('E').format(date);
 
-    dailyData[dayStr] = {
-      'day': dayStr,
-      'steps': 0,
-      'weight': 0.0,
-      'systolicSum': 0,
-      'systolicCount': 0,
-      'stepsSum': 0,
-      'stepsCount': 0,
-      'weightSum': 0.0,
-      'weightCount': 0,
-    };
-  }
-
-  // Process vitals
-  for (var doc in vitalSignsSnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
-    final timestamp = data['timestamp'] as Timestamp?;
-    final systolic = data['systolic_BP'] as int?;
-
-    if (timestamp != null && systolic != null) {
-      final dayStr = DateFormat('E').format(timestamp.toDate());
-      if (dailyData.containsKey(dayStr)) {
-        dailyData[dayStr]!['systolicSum'] += systolic;
-        dailyData[dayStr]!['systolicCount'] += 1;
+        dailyData[dayStr] = {
+          'day': dayStr,
+          'steps': 0,
+          'weight': 0.0,
+          'systolicSum': 0,
+          'systolicCount': 0,
+          'stepsSum': 0,
+          'stepsCount': 0,
+          'weightSum': 0.0,
+          'weightCount': 0,
+        };
       }
+
+      // Process vitals - with safe parsing
+      for (var doc in vitalSignsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final systolic = _parseIntFromDynamic(data['systolic_BP']);
+
+        if (timestamp != null && systolic > 0) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['systolicSum'] += systolic;
+            dailyData[dayStr]!['systolicCount'] += 1;
+          }
+        }
+      }
+
+      // Process activity - with safe parsing
+      for (var doc in activitySnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final steps = _parseIntFromDynamic(data['steps']);
+
+        if (timestamp != null) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['stepsSum'] += steps;
+            dailyData[dayStr]!['stepsCount'] += 1;
+          }
+        }
+      }
+
+      // Process weight - with safe parsing
+      for (var doc in weightSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final current = _parseDoubleFromDynamic(data['current']);
+
+        if (timestamp != null && current > 0) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['weightSum'] += current;
+            dailyData[dayStr]!['weightCount'] += 1;
+          }
+        }
+      }
+
+      // Finalize daily stats
+      List<Map<String, dynamic>> weeklyStats = dailyData.values.map((dayData) {
+        return {
+          'day': dayData['day'],
+          'systolic': dayData['systolicCount'] > 0
+              ? (dayData['systolicSum'] / dayData['systolicCount']).round()
+              : 0,
+          'steps': dayData['stepsCount'] > 0
+              ? (dayData['stepsSum'] / dayData['stepsCount']).round()
+              : 0,
+          'weight': dayData['weightCount'] > 0
+              ? (dayData['weightSum'] / dayData['weightCount']).toStringAsFixed(1)
+              : '0.0',
+        };
+      }).toList();
+
+      // Sort by day order
+      weeklyStats.sort((a, b) =>
+          dayOrder.indexOf(a['day']) - dayOrder.indexOf(b['day']));
+
+      // Set state
+      if (mounted) {
+        setState(() {
+          _weeklyStats = weeklyStats;
+        });
+      }
+    } catch (e) {
+      print('Error loading weekly trends: $e');
     }
   }
-
-  // Process activity
-  for (var doc in activitySnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
-    final timestamp = data['timestamp'] as Timestamp?;
-    final steps = data['steps'] as int?;
-
-    if (timestamp != null && steps != null) {
-      final dayStr = DateFormat('E').format(timestamp.toDate());
-      if (dailyData.containsKey(dayStr)) {
-        dailyData[dayStr]!['stepsSum'] += steps;
-        dailyData[dayStr]!['stepsCount'] += 1;
-      }
-    }
-  }
-
-  // Process weight
-  for (var doc in weightSnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
-    final timestamp = data['timestamp'] as Timestamp?;
-    final current = (data['current'] as num?)?.toDouble();
-
-    if (timestamp != null && current != null) {
-      final dayStr = DateFormat('E').format(timestamp.toDate());
-      if (dailyData.containsKey(dayStr)) {
-        dailyData[dayStr]!['weightSum'] += current;
-        dailyData[dayStr]!['weightCount'] += 1;
-      }
-    }
-  }
-
-  // Finalize daily stats
-  List<Map<String, dynamic>> weeklyStats = dailyData.values.map((dayData) {
-    return {
-      'day': dayData['day'],
-      'systolic': dayData['systolicCount'] > 0
-          ? (dayData['systolicSum'] / dayData['systolicCount']).round()
-          : 0,
-      'steps': dayData['stepsCount'] > 0
-          ? (dayData['stepsSum'] / dayData['stepsCount']).round()
-          : 0,
-      'weight': dayData['weightCount'] > 0
-          ? (dayData['weightSum'] / dayData['weightCount']).toStringAsFixed(1)
-          : '0.0',
-    };
-  }).toList();
-
-  // Sort by day order
-  weeklyStats.sort((a, b) =>
-      dayOrder.indexOf(a['day']) - dayOrder.indexOf(b['day']));
-
-  // Set state
-  setState(() {
-    _weeklyStats = weeklyStats;
-  });
-}
 
   @override
   Widget build(BuildContext context) {
@@ -1283,8 +1331,6 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
   String _getInsightTextForBP() {
     final bpStatus = _healthData['bloodPressure']['status'];
-    final systolic = _healthData['bloodPressure']['morningAvgSys'];
-    final diastolic = _healthData['bloodPressure']['morningAvgDia'];
     
     if (bpStatus == 'Optimal') {
       return 'Your blood pressure readings are in the optimal range.';
@@ -1324,7 +1370,6 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
   String _getInsightTextForActivity() {
     final steps = _healthData['activity']['steps'];
-    final activeMinutes = _healthData['activity']['activeMinutes'];
     
     if (steps >= 10000) {
       return 'Great job! You\'ve reached your step goal of 10,000 steps.';
