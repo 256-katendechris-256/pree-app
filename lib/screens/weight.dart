@@ -31,6 +31,7 @@ class _WeightScreenState extends State<WeightScreen> {
   // FireStore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+
   @override
   void initState() {
     super.initState();
@@ -118,6 +119,8 @@ class _WeightScreenState extends State<WeightScreen> {
         _isLoading = false;
       });
     }
+
+
   }
 
   @override
@@ -1046,5 +1049,4 @@ class BMIGaugePainter extends CustomPainter {
     return true;
   }
 
-  
 }
