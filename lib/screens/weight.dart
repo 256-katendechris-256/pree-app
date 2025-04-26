@@ -1,511 +1,1052 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'dart:math';
+import '../screens/manual_reading_weight.dart';
 
-class WeightEntryScreen extends StatefulWidget {
-  const WeightEntryScreen({super.key});
+class WeightScreen extends StatefulWidget {
+  const WeightScreen({super.key});
 
   @override
-  State<WeightEntryScreen> createState() => _WeightEntryScreenState();
+  State<WeightScreen> createState() => _WeightScreenState();
 }
 
-class _WeightEntryScreenState extends State<WeightEntryScreen> {
-  final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _dateController = TextEditingController();
-  final TextEditingController _timeController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
-  final FocusNode _weightFocusNode = FocusNode();
+class _WeightScreenState extends State<WeightScreen> {
+  // Weight data
+  Map<String, dynamic> _currentWeight = {
+    'weight': 0.0,
+    'bmi': 0.0,
+    'goal': 70.0,
+    'unit': 'kg',
+    'date': DateTime.now(),
+  };
 
-  bool _showNumpad = false; // Initially hide the numpad
-  String _currentFieldValue = '';
-  TextEditingController? _currentController;
-  FocusNode? _currentFocusNode;
+  // Monthly weight data
+  List<Map<String, dynamic>> _monthlyWeights = [];
+  
+  // Loading state
+  bool _isLoading = true;
+  
+  // FireStore instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Store weight unit
-  String _weightUnit = 'kg'; // Default unit
 
   @override
   void initState() {
     super.initState();
-    // Initialize with current date and time
-    final now = DateTime.now();
-    _dateController.text = DateFormat('dd/MM/yyyy').format(now);
-    _timeController.text = DateFormat('h:mm a').format(now);
-
-    // Set default values for focus and controllers
-    _currentController = _weightController;
-    _currentFocusNode = _weightFocusNode;
+    _fetchWeightData();
   }
 
-  @override
-  void dispose() {
-    _weightController.dispose();
-    _dateController.dispose();
-    _timeController.dispose();
-    _noteController.dispose();
-    _weightFocusNode.dispose();
-    super.dispose();
-  }
-
-  void _onNumpadPressed(String value) {
-    if (_currentController == null) return;
-
+  // Fetch weight data from Firebase
+  Future<void> _fetchWeightData() async {
     setState(() {
-      if (value == '⌫') { // Backspace
-        if (_currentFieldValue.isNotEmpty) {
-          _currentFieldValue = _currentFieldValue.substring(0, _currentFieldValue.length - 1);
-        }
-      } else if (value == 'Next') {
-        _saveReading();
-      } else if (value == '.') {
-        // Only add decimal point if there isn't one already
-        if (!_currentFieldValue.contains('.')) {
-          _currentFieldValue = _currentFieldValue.isEmpty ? '0.' : '$_currentFieldValue.';
-        }
-      } else {
-        // Only add the number if within reasonable range
-        final newValue = _currentFieldValue + value;
-        if (_currentController == _weightController) {
-          // Allow decimal values for weight
-          if (double.tryParse(newValue) != null) {
-            // Limit to 1 decimal place
-            final parts = newValue.split('.');
-            if (parts.length == 1 || parts[1].length <= 1) {
-              // Check if weight is within reasonable range (1-500 kg or 2-1100 lbs)
-              final double weightValue = double.parse(newValue);
-              final double maxWeight = _weightUnit == 'kg' ? 500.0 : 1100.0;
-              if (weightValue > 0 && weightValue <= maxWeight) {
-                _currentFieldValue = newValue;
-              }
-            }
-          }
-        }
+      _isLoading = true;
+    });
+    
+    try {
+      // Get current user ID (you'll need to implement user authentication)
+      String userId = 'current_user_id';
+      
+      // Get the latest weight entry
+      var latestWeightDoc = await _firestore
+          .collection('user')
+          .doc(userId)
+          .collection('weight')
+          .orderBy('date', descending: true)
+          .limit(1)
+          .get();
+      
+      if (latestWeightDoc.docs.isNotEmpty) {
+        var data = latestWeightDoc.docs.first.data();
+        setState(() {
+          _currentWeight = {
+            'weight': data['weight'] ?? 0.0,
+            'bmi': data['bmi'] ?? 0.0,
+            'goal': data['goal'] ?? 70.0,
+            'unit': data['unit'] ?? 'kg',
+            'date': (data['date'] as Timestamp).toDate(),
+          };
+        });
       }
-
-      // Update the controller text
-      _currentController!.text = _currentFieldValue;
-    });
-  }
-
-  void _setFocusToField(TextEditingController controller, FocusNode focusNode) {
-    setState(() {
-      _currentController = controller;
-      _currentFocusNode = focusNode;
-      _currentFieldValue = controller.text;
-      focusNode.requestFocus();
-    });
-  }
-
-  void _toggleWeightUnit() {
-    setState(() {
-      _weightUnit = _weightUnit == 'kg' ? 'lb' : 'kg';
-
-      // Convert the current value if needed
-      if (_weightController.text.isNotEmpty) {
-        final double currentValue = double.tryParse(_weightController.text) ?? 0;
-        if (currentValue > 0) {
-          double convertedValue;
-          if (_weightUnit == 'kg') {
-            // Convert from lb to kg
-            convertedValue = currentValue * 0.453592;
-          } else {
-            // Convert from kg to lb
-            convertedValue = currentValue * 2.20462;
-          }
-
-          // Round to 1 decimal place
-          _weightController.text = convertedValue.toStringAsFixed(1);
-          _currentFieldValue = _weightController.text;
-        }
+      
+      // Get last 30 days of weight entries
+      var monthlyData = await _firestore
+          .collection('user')
+          .doc(userId)
+          .collection('weight')
+          .orderBy('date')
+          .where('date', 
+                isGreaterThan: DateTime.now().subtract(const Duration(days: 30)))
+          .get();
+      
+      List<Map<String, dynamic>> weights = [];
+      for (var doc in monthlyData.docs) {
+        var data = doc.data();
+        weights.add({
+          'weight': data['weight'] ?? 0.0,
+          'date': (data['date'] as Timestamp).toDate(),
+          'id': doc.id,
+        });
       }
-    });
-  }
-
-  void _saveReading() {
-    // Validation
-    if (_weightController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter weight value')),
-      );
-      return;
+      
+      setState(() {
+        _monthlyWeights = weights;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error fetching weight data: $e');
+      
+      // If error, use mock data for development
+      setState(() {
+        _currentWeight = {
+          'weight': 75.5,
+          'bmi': 24.2,
+          'goal': 70.0,
+          'unit': 'kg',
+          'date': DateTime.now(),
+        };
+        
+        // Generate mock data for the past 30 days
+        _monthlyWeights = List.generate(30, (index) {
+          return {
+            'weight': 75.5 - (index * 0.1),
+            'date': DateTime.now().subtract(Duration(days: 29 - index)),
+            'id': 'mock_$index',
+          };
+        });
+        
+        _isLoading = false;
+      });
     }
 
-    // Return the reading to the previous screen
-    Navigator.pop(context, {
-      'weight': double.parse(_weightController.text),
-      'unit': _weightUnit,
-      'date': _dateController.text,
-      'time': _timeController.text,
-      'note': _noteController.text,
-    });
+
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0069B4),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Add weight measurement',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _saveReading,
-            child: const Text(
-              'ADD',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
+      backgroundColor: Colors.grey[100],
+      body: _isLoading 
+          ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
+          : _buildWeightContent(),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.indigo,
+        onPressed: () => _navigateToAddWeightScreen(),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
-      body: Column(
-        children: [
-          // Form fields
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  Widget _buildWeightContent() {
+    return RefreshIndicator(
+      onRefresh: _fetchWeightData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCurrentWeightCard(),
+            _buildWeightTrendChart(),
+            _buildBMICard(),
+            _buildGoalProgressCard(),
+            _buildRecentEntriesCard(),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentWeightCard() {
+    return Card(
+      margin: const EdgeInsets.all(16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Current Weight',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                Text(
+                  'Last updated: ${DateFormat('MMM d, yyyy').format(_currentWeight['date'])}',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
                 children: [
-                  _buildInputField(
-                    label: 'Date:',
-                    controller: _dateController,
-                    readOnly: true,
-                    trailingIcon: Icons.calendar_today,
-                    onTap: () async {
-                      // Hide numpad when selecting date
-                      setState(() {
-                        _showNumpad = false;
-                      });
-
-                      final DateTime? picked = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now(),
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          _dateController.text = DateFormat('dd/MM/yyyy').format(picked);
-                        });
-                      }
-                    },
+                  Text(
+                    _currentWeight['weight'].toString(),
+                    style: const TextStyle(
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.indigo,
+                    ),
                   ),
-                  _buildInputField(
-                    label: 'Time:',
-                    controller: _timeController,
-                    readOnly: true,
-                    onTap: () async {
-                      // Hide numpad when selecting time
-                      setState(() {
-                        _showNumpad = false;
-                      });
-
-                      final TimeOfDay? picked = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          final now = DateTime.now();
-                          final dt = DateTime(
-                              now.year, now.month, now.day, picked.hour, picked.minute);
-                          _timeController.text = DateFormat('h:mm a').format(dt);
-                        });
-                      }
-                    },
-                  ),
-                  _buildWeightField(),
-                  _buildInputField(
-                    label: 'Note:',
-                    controller: _noteController,
-                    isMultiline: true,
-                    onTap: () {
-                      setState(() {
-                        _showNumpad = false;
-                      });
-                    },
+                  const SizedBox(width: 4),
+                  Text(
+                    _currentWeight['unit'],
+                    style: TextStyle(
+                      fontSize: 20,
+                      color: Colors.grey[700],
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-
-          // Numpad (only shown when a numeric field is tapped)
-          if (_showNumpad)
-            _buildNumpad(),
-        ],
+            const SizedBox(height: 16),
+            if (_monthlyWeights.length >= 2)
+              Center(
+                child: _buildWeightChangeIndicator(),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildWeightField() {
-    final bool isCurrentFocus = _currentFocusNode == _weightFocusNode;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 150,
-            child: const Text(
-              'Weight:',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
+  Widget _buildWeightChangeIndicator() {
+    // Calculate weight change
+    double latestWeight = _monthlyWeights.last['weight'];
+    double previousWeight = _monthlyWeights[_monthlyWeights.length - 2]['weight'];
+    double change = latestWeight - previousWeight;
+    bool isPositive = change > 0;
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isPositive ? Icons.arrow_upward : Icons.arrow_downward,
+          color: isPositive ? Colors.red : Colors.green,
+          size: 16,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '${change.abs().toStringAsFixed(1)} ${_currentWeight['unit']}',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isPositive ? Colors.red : Colors.green,
           ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                _setFocusToField(_weightController, _weightFocusNode);
-                setState(() {
-                  _showNumpad = true;
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: isCurrentFocus ? Colors.blue.shade700 : Colors.grey.shade300,
-                    width: isCurrentFocus ? 2.0 : 1.0,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'since last entry',
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWeightTrendChart() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Weight Trend',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
                   ),
-                  borderRadius: BorderRadius.circular(4),
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          Text(
-                            _weightController.text,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.black87,
+                TextButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.calendar_month, size: 16),
+                  label: const Text('Last 30 Days'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.indigo,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _monthlyWeights.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: Text('No weight data available'),
+                    ),
+                  )
+                : Container(
+                    height: 200,
+                    padding: const EdgeInsets.only(right: 16, top: 16),
+                    child: LineChart(
+                      LineChartData(
+                        gridData: FlGridData(
+                          show: true,
+                          horizontalInterval: 5,
+                          drawVerticalLine: false,
+                          getDrawingHorizontalLine: (value) {
+                            return FlLine(
+                              color: Colors.grey[300],
+                              strokeWidth: 1,
+                            );
+                          },
+                        ),
+                        titlesData: FlTitlesData(
+                          bottomTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 30,
+                              getTitlesWidget: (value, meta) {
+                                if (value.toInt() % 5 == 0 && 
+                                    value.toInt() < _monthlyWeights.length && 
+                                    value.toInt() >= 0) {
+                                  final date = _monthlyWeights[value.toInt()]['date'] as DateTime;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Text(
+                                      DateFormat('d MMM').format(date),
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return const Text('');
+                              },
                             ),
                           ),
-                          if (isCurrentFocus && _weightController.text.isEmpty)
-                            Container(
-                              width: 2,
-                              height: 20,
-                              color: Colors.blue.shade700,
-                              margin: const EdgeInsets.only(left: 2),
+                          leftTitles: AxisTitles(
+                            sideTitles: SideTitles(
+                              showTitles: true,
+                              reservedSize: 40,
+                              getTitlesWidget: (value, meta) {
+                                return Text(
+                                  value.toInt().toString(),
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 10,
+                                  ),
+                                );
+                              },
                             ),
-                        ],
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Text(
-                          _weightUnit,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade600,
+                          ),
+                          rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
+                          ),
+                          topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false),
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.swap_horiz, size: 20),
-                          color: Colors.blue.shade800,
-                          onPressed: _toggleWeightUnit,
+                        borderData: FlBorderData(show: false),
+                        lineBarsData: [
+                          LineChartBarData(
+                            spots: List.generate(_monthlyWeights.length, (index) {
+                              return FlSpot(
+                                index.toDouble(),
+                                _monthlyWeights[index]['weight'],
+                              );
+                            }),
+                            isCurved: true,
+                            color: Colors.indigo,
+                            barWidth: 3,
+                            isStrokeCapRound: true,
+                            dotData: const FlDotData(show: false),
+                            belowBarData: BarAreaData(
+                              show: true,
+                              color: Colors.indigo.withOpacity(0.2),
+                            ),
+                          ),
+                          // Goal line
+                          LineChartBarData(
+                            spots: List.generate(_monthlyWeights.length, (index) {
+                              return FlSpot(
+                                index.toDouble(),
+                                _currentWeight['goal'],
+                              );
+                            }),
+                            isCurved: false,
+                            color: Colors.amber,
+                            barWidth: 2,
+                            isStrokeCapRound: true,
+                            dotData: const FlDotData(show: false),
+                            dashArray: [5, 5],
+                          ),
+                        ],
+                        minY: _calculateMinY(),
+                        maxY: _calculateMaxY(),
+                      ),
+                    ),
+                  ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildLegendItem('Weight', Colors.indigo),
+                const SizedBox(width: 20),
+                _buildLegendItem('Goal', Colors.amber),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  double _calculateMinY() {
+    if (_monthlyWeights.isEmpty) return 50.0;
+    
+    double minWeight = _monthlyWeights
+        .map((entry) => entry['weight'] as double)
+        .reduce((min, weight) => weight < min ? weight : min);
+    
+    double goal = _currentWeight['goal'];
+    
+    // Return the lower of the two, minus a padding of 5
+    return (minWeight < goal ? minWeight : goal) - 5;
+  }
+
+  double _calculateMaxY() {
+    if (_monthlyWeights.isEmpty) return 100.0;
+    
+    double maxWeight = _monthlyWeights
+        .map((entry) => entry['weight'] as double)
+        .reduce((max, weight) => weight > max ? weight : max);
+    
+    double goal = _currentWeight['goal'];
+    
+    // Return the higher of the two, plus a padding of 5
+    return (maxWeight > goal ? maxWeight : goal) + 5;
+  }
+
+  Widget _buildLegendItem(String label, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[600],
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBMICard() {
+    String bmiCategory;
+    Color bmiColor;
+    
+    // BMI Categories
+    if (_currentWeight['bmi'] < 18.5) {
+      bmiCategory = 'Underweight';
+      bmiColor = Colors.blue;
+    } else if (_currentWeight['bmi'] < 25) {
+      bmiCategory = 'Normal';
+      bmiColor = Colors.green;
+    } else if (_currentWeight['bmi'] < 30) {
+      bmiCategory = 'Overweight';
+      bmiColor = Colors.orange;
+    } else {
+      bmiCategory = 'Obese';
+      bmiColor = Colors.red;
+    }
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'BMI',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.indigo,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          _currentWeight['bmi'].toStringAsFixed(1),
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.indigo,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'kg/m²',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey[600],
+                          ),
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInputField({
-    required String label,
-    required TextEditingController controller,
-    String? suffix,
-    bool readOnly = false,
-    VoidCallback? onTap,
-    IconData? trailingIcon,
-    FocusNode? focusNode,
-    bool isMultiline = false,
-  }) {
-    final bool isCurrentFocus = _currentFocusNode == focusNode;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Row(
-        crossAxisAlignment: isMultiline ? CrossAxisAlignment.start : CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: isCurrentFocus ? Colors.blue.shade700 : Colors.grey.shade300,
-                    width: isCurrentFocus ? 2.0 : 1.0,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: isMultiline
-                    ? TextField(
-                  controller: controller,
-                  decoration: const InputDecoration.collapsed(
-                    hintText: 'Add a note (optional)',
-                  ),
-                  maxLines: 3,
-                  textInputAction: TextInputAction.done,
-                )
-                    : Row(
-                  children: [
-                    Expanded(
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: bmiColor,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       child: Text(
-                        controller.text,
+                        bmiCategory,
                         style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.black87,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
                         ),
                       ),
                     ),
-                    if (suffix != null)
-                      Text(
-                        suffix,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade600,
+                  ],
+                ),
+                SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: CustomPaint(
+                    painter: BMIGaugePainter(
+                      bmi: _currentWeight['bmi'],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'BMI Categories:',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildBMICategoryLabel('Underweight', Colors.blue, '< 18.5'),
+                _buildBMICategoryLabel('Normal', Colors.green, '18.5-24.9'),
+                _buildBMICategoryLabel('Overweight', Colors.orange, '25-29.9'),
+                _buildBMICategoryLabel('Obese', Colors.red, '≥ 30'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBMICategoryLabel(String label, Color color, String range) {
+    return Column(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        Text(
+          range,
+          style: TextStyle(
+            fontSize: 9,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGoalProgressCard() {
+    final double progressPercentage = (_currentWeight['goal'] / _currentWeight['weight']).clamp(0.0, 1.0);
+    final bool isReached = _currentWeight['weight'] <= _currentWeight['goal'];
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Goal Progress',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    // Show dialog to edit goal
+                    _showEditGoalDialog();
+                  },
+                  icon: const Icon(Icons.edit, size: 16),
+                  label: const Text('Edit'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.indigo,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Stack(
+                children: [
+                  FractionallySizedBox(
+                    widthFactor: isReached ? 1.0 : progressPercentage,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isReached ? Colors.green : Colors.indigo,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Current: ${_currentWeight['weight']} ${_currentWeight['unit']}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                Text(
+                  'Goal: ${_currentWeight['goal']} ${_currentWeight['unit']}',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              isReached
+                  ? 'Congratulations! You have reached your goal weight!'
+                  : 'Need to lose ${(_currentWeight['weight'] - _currentWeight['goal']).toStringAsFixed(1)} ${_currentWeight['unit']} to reach your goal',
+              style: TextStyle(
+                color: isReached ? Colors.green : Colors.grey[600],
+                fontSize: 14,
+                fontWeight: isReached ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditGoalDialog() {
+    final TextEditingController goalController = TextEditingController(
+      text: _currentWeight['goal'].toString(),
+    );
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Weight Goal'),
+        content: TextField(
+          controller: goalController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Goal Weight (${_currentWeight['unit']})',
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              // Update the goal
+              setState(() {
+                _currentWeight['goal'] = double.tryParse(goalController.text) ?? _currentWeight['goal'];
+              });
+              
+              // Update in Firebase
+              _updateGoalInFirebase();
+              
+              Navigator.pop(context);
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.indigo,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateGoalInFirebase() async {
+    try {
+      String userId = 'current_user_id';
+      
+      await _firestore
+          .collection('user')
+          .doc(userId)
+          .set({
+            'weightGoal': _currentWeight['goal'],
+          }, SetOptions(merge: true));
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Weight goal updated successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating weight goal: $e')),
+      );
+    }
+  }
+
+  Widget _buildRecentEntriesCard() {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Recent Entries',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    // View all entries
+                  },
+                  icon: const Icon(Icons.list, size: 16),
+                  label: const Text('View All'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.indigo,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _monthlyWeights.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: Text('No recent entries'),
+                    ),
+                  )
+                : ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _monthlyWeights.length > 5 ? 5 : _monthlyWeights.length,
+                    itemBuilder: (context, index) {
+                      // Display in reverse order (most recent first)
+                      final entryIndex = _monthlyWeights.length - 1 - index;
+                      final entry = _monthlyWeights[entryIndex];
+                      final entryDate = entry['date'] as DateTime;
+                      
+                      // Calculate weight change compared to previous entry
+                      double? change;
+                      if (entryIndex > 0) {
+                        change = entry['weight'] - _monthlyWeights[entryIndex - 1]['weight'];
+                      }
+                      
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          '${entry['weight']} ${_currentWeight['unit']}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
-                    if (trailingIcon != null)
-                      Icon(
-                        trailingIcon,
-                        color: Colors.blue.shade800,
-                        size: 20,
-                      ),
-                  ],
-                ),
-              ),
+                        subtitle: Text(
+                          DateFormat('EEEE, MMM d, yyyy').format(entryDate),
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                        trailing: change != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    change > 0 ? Icons.arrow_upward : Icons.arrow_downward,
+                                    color: change > 0 ? Colors.red : Colors.green,
+                                    size: 16,
+                                  ),
+                                  Text(
+                                    '${change.abs().toStringAsFixed(1)} ${_currentWeight['unit']}',
+                                    style: TextStyle(
+                                      color: change > 0 ? Colors.red : Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : const Text('First Entry'),
+                        onTap: () {
+                          // Show entry details or allow editing
+                          _showEntryDetailsDialog(entry);
+                        },
+                      );
+                    },
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEntryDetailsDialog(Map<String, dynamic> entry) {
+    final DateTime entryDate = entry['date'] as DateTime;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Entry on ${DateFormat('MMM d, yyyy').format(entryDate)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Weight: ${entry['weight']} ${_currentWeight['unit']}'),
+            const SizedBox(height: 8),
+            Text('Date: ${DateFormat('EEEE, MMM d, yyyy').format(entryDate)}'),
+            const SizedBox(height: 8),
+            Text('Time: ${DateFormat('h:mm a').format(entryDate)}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteWeightEntry(entry['id']);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
             ),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildNumpad() {
-    return Container(
-      color: Colors.black87,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildToolbarButton(Icons.note),
-              _buildToolbarButton(Icons.mood),
-              _buildToolbarButton(Icons.grid_on),
-              _buildToolbarButton(Icons.mic),
-              _buildToolbarButton(Icons.settings),
-              _buildToolbarButton(Icons.more_horiz),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: GridView.count(
-                  crossAxisCount: 4,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.5,
-                  padding: EdgeInsets.zero,
-                  children: [
-                    _buildNumpadKey('1'),
-                    _buildNumpadKey('2'),
-                    _buildNumpadKey('3'),
-                    _buildNumpadKey('⌫'),
-                    _buildNumpadKey('4'),
-                    _buildNumpadKey('5'),
-                    _buildNumpadKey('6'),
-                    _buildNumpadKey('Next', isBlue: true),
-                    _buildNumpadKey('7'),
-                    _buildNumpadKey('8'),
-                    _buildNumpadKey('9'),
-                    _buildNumpadKey('.'),
-                    _buildNumpadKey('0'),
-                    _buildNumpadKey(''),
-                    _buildNumpadKey(''),
-                    _buildNumpadKey(''),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
+  Future<void> _deleteWeightEntry(String entryId) async {
+    try {
+      String userId = 'current_user_id';
+      
+      await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('weights')
+          .doc(entryId)
+          .delete();
+      
+      // Refresh data
+      _fetchWeightData();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Weight entry deleted successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting entry: $e')),
+      );
+    }
   }
 
-  Widget _buildToolbarButton(IconData icon) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.grey,
-      ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: 20,
+  void _navigateToAddWeightScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const ManualWeightScreen(),
       ),
     );
+    
+    if (result == true) {
+      // Refresh data when returning from manual weight screen
+      _fetchWeightData();
+    }
+  }
+}
+
+// Custom painter for BMI gauge
+class BMIGaugePainter extends CustomPainter {
+  final double bmi;
+
+  BMIGaugePainter({required this.bmi});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    
+    // Draw gauge background
+    final paintBackground = Paint()
+      ..color = Colors.grey[200]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10;
+    
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 5),
+      -3 * pi / 4,
+      6 * pi / 4,
+      false,
+      paintBackground,
+    );
+    
+    // Calculate BMI progress on gauge (0-40 BMI scale)
+    final bmiProgress = (bmi / 40).clamp(0.0, 1.0);
+    final sweepAngle = bmiProgress * 6 * pi / 4;
+    
+    // Determine color based on BMI value
+    Color gaugeColor;
+    if (bmi < 18.5) {
+      gaugeColor = Colors.blue;
+    } else if (bmi < 25) {
+      gaugeColor = Colors.green;
+    } else if (bmi < 30) {
+      gaugeColor = Colors.orange;
+    } else {
+      gaugeColor = Colors.red;
+    }
+    
+    // Draw gauge progress
+    final paintProgress = Paint()
+      ..color = gaugeColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..strokeCap = StrokeCap.round;
+    
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius - 5),
+      -3 * pi / 4,
+      sweepAngle,
+      false,
+      paintProgress,
+    );
+    
+    // Draw BMI needle
+    final needleLength = radius - 20;
+    final needleAngle = -3 * pi / 4 + sweepAngle;
+    final needleStart = center;
+    final needleEnd = Offset(
+      center.dx + needleLength * cos(needleAngle),
+      center.dy + needleLength * sin(needleAngle),
+    );
+    
+    final paintNeedle = Paint()
+      ..color = Colors.grey[800]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    
+    canvas.drawLine(needleStart, needleEnd, paintNeedle);
+    
+    // Draw needle center point
+    final paintCenter = Paint()
+      ..color = Colors.grey[800]!
+      ..style = PaintingStyle.fill;
+    
+    canvas.drawCircle(center, 5, paintCenter);
   }
 
-  Widget _buildNumpadKey(String value, {bool isBlue = false}) {
-    return InkWell(
-      onTap: value.isEmpty ? null : () => _onNumpadPressed(value),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade800,
-          border: Border.all(color: Colors.black, width: 0.5),
-        ),
-        child: Center(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: isBlue ? Colors.blue : Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true;
   }
+
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class HealthOverviewScreen extends StatefulWidget {
   const HealthOverviewScreen({super.key});
@@ -12,40 +14,37 @@ class HealthOverviewScreen extends StatefulWidget {
 class _HealthOverviewScreenState extends State<HealthOverviewScreen> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   late TabController _tabController;
-
-  // Sample data
+  bool _isLoading = true;
+  
+  // Data containers
   final Map<String, dynamic> _healthData = {
     'bloodPressure': {
-      'morningAvgSys': 114,
-      'morningAvgDia': 69,
-      'eveningAvgSys': 119,
-      'eveningAvgDia': 76,
-      'status': 'Optimal'
+      'morningAvgSys': 0,
+      'morningAvgDia': 0,
+      'eveningAvgSys': 0,
+      'eveningAvgDia': 0,
+      'status': 'Loading'
     },
     'activity': {
-      'steps': 8765,
-      'distance': 5.4,
-      'calories': 456,
-      'activeMinutes': 68
+      'steps': 0,
+      'distance': 0,
+      'calories': 0,
+      'activeMinutes': 0
     },
     'weight': {
-      'current': 72.5,
-      'change': -0.3,
-      'bmi': 23.8,
-      'status': 'Normal'
+      'current': 0,
+      'change': 0,
+      'bmi': 0,
+      'status': 'Loading'
     }
   };
 
   // Weekly trends
-  final List<Map<String, dynamic>> _weeklyStats = [
-    {'day': 'Mon', 'steps': 7245, 'weight': 72.8, 'systolic': 120},
-    {'day': 'Tue', 'steps': 8532, 'weight': 72.6, 'systolic': 119},
-    {'day': 'Wed', 'steps': 10234, 'weight': 72.5, 'systolic': 116},
-    {'day': 'Thu', 'steps': 6789, 'weight': 72.5, 'systolic': 118},
-    {'day': 'Fri', 'steps': 9567, 'weight': 72.4, 'systolic': 115},
-    {'day': 'Sat', 'steps': 11243, 'weight': 72.3, 'systolic': 117},
-    {'day': 'Sun', 'steps': 8765, 'weight': 72.5, 'systolic': 114},
-  ];
+  List<Map<String, dynamic>> _weeklyStats = [];
+  
+  // Reference to Firestore
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final String _userId = FirebaseAuth.instance.currentUser?.uid ?? 'defaultUserId';
 
   @override
   void initState() {
@@ -54,12 +53,366 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
     _tabController.addListener(() {
       setState(() {});
     });
+    
+    // Load data from Firebase
+    _loadUserHealthData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+  
+  // Helper method to safely parse integers from various data types
+  int _parseIntFromDynamic(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is String) return int.tryParse(value) ?? 0;
+    if (value is double) return value.toInt();
+    return 0;
+  }
+  
+  // Helper method to safely parse doubles from various data types
+  double _parseDoubleFromDynamic(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+  
+  Future<void> _loadUserHealthData() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      // Load most recent vital signs (blood pressure)
+      await _loadBloodPressureData();
+      
+      // Load activity data
+      await _loadActivityData();
+      
+      // Load weight data
+      await _loadWeightData();
+      
+      // Load weekly trends
+      await _loadWeeklyTrends();
+      
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading health data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+      
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load health data: $e'))
+        );
+      }
+    }
+  }
+  
+  Future<void> _loadBloodPressureData() async {
+    try {
+      // Query vital_signs collection sorted by timestamp
+      final QuerySnapshot vitalSignsSnapshot = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(10)
+          .get();
+      
+      if (vitalSignsSnapshot.docs.isEmpty) {
+        return;
+      }
+      
+      // Process vitals to determine morning and evening readings
+      List<Map<String, dynamic>> morningReadings = [];
+      List<Map<String, dynamic>> eveningReadings = [];
+      
+      for (var doc in vitalSignsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timeStr = data['time'] as String? ?? '';
+        
+        // Parse time to determine if morning or evening
+        if (timeStr.contains('AM') || (timeStr.isNotEmpty && (int.tryParse(timeStr.split(':')[0]) ?? 0) < 12)) {
+          morningReadings.add(data);
+        } else {
+          eveningReadings.add(data);
+        }
+      }
+      
+      // Calculate averages with safe parsing
+      int morningAvgSys = 0;
+      int morningAvgDia = 0;
+      int eveningAvgSys = 0;
+      int eveningAvgDia = 0;
+      
+      if (morningReadings.isNotEmpty) {
+        int sysSum = morningReadings.map((e) => _parseIntFromDynamic(e['systolic_BP'])).reduce((a, b) => a + b);
+        int diaSum = morningReadings.map((e) => _parseIntFromDynamic(e['diastolic'])).reduce((a, b) => a + b);
+        morningAvgSys = sysSum ~/ morningReadings.length;
+        morningAvgDia = diaSum ~/ morningReadings.length;
+      }
+      
+      if (eveningReadings.isNotEmpty) {
+        int sysSum = eveningReadings.map((e) => _parseIntFromDynamic(e['systolic_BP'])).reduce((a, b) => a + b);
+        int diaSum = eveningReadings.map((e) => _parseIntFromDynamic(e['diastolic'])).reduce((a, b) => a + b);
+        eveningAvgSys = sysSum ~/ eveningReadings.length;
+        eveningAvgDia = diaSum ~/ eveningReadings.length;
+      }
+      
+      // Determine BP status
+      String bpStatus = 'Normal';
+      final avgSys = (morningAvgSys + eveningAvgSys) ~/ (morningAvgSys > 0 && eveningAvgSys > 0 ? 2 : 1);
+      final avgDia = (morningAvgDia + eveningAvgDia) ~/ (morningAvgDia > 0 && eveningAvgDia > 0 ? 2 : 1);
+      
+      if (avgSys < 120 && avgDia < 80) {
+        bpStatus = 'Optimal';
+      } else if ((avgSys >= 120 && avgSys <= 129) && avgDia < 80) {
+        bpStatus = 'Elevated';
+      } else if ((avgSys >= 130 && avgSys <= 139) || (avgDia >= 80 && avgDia <= 89)) {
+        bpStatus = 'Stage 1';
+      } else if (avgSys >= 140 || avgDia >= 90) {
+        bpStatus = 'Stage 2';
+      }
+      
+      // Update health data
+      if (mounted) {
+        setState(() {
+          _healthData['bloodPressure'] = {
+            'morningAvgSys': morningAvgSys > 0 ? morningAvgSys : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['systolic_BP']),
+            'morningAvgDia': morningAvgDia > 0 ? morningAvgDia : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['diastolic']),
+            'eveningAvgSys': eveningAvgSys > 0 ? eveningAvgSys : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['systolic_BP']),
+            'eveningAvgDia': eveningAvgDia > 0 ? eveningAvgDia : _parseIntFromDynamic(vitalSignsSnapshot.docs.first['diastolic']),
+            'status': bpStatus,
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading blood pressure data: $e');
+    }
+  }
+  
+  Future<void> _loadActivityData() async {
+    try {
+      // Get the latest activity data
+      final QuerySnapshot activitySnapshot = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+      
+      if (activitySnapshot.docs.isEmpty) {
+        return;
+      }
+      
+      final activityData = activitySnapshot.docs.first.data() as Map<String, dynamic>;
+      
+      // Update activity data with safe parsing
+      if (mounted) {
+        setState(() {
+          _healthData['activity'] = {
+            'steps': _parseIntFromDynamic(activityData['steps']),
+            'distance': _parseDoubleFromDynamic(activityData['distance']),
+            'calories': _parseIntFromDynamic(activityData['calories']),
+            'activeMinutes': _parseIntFromDynamic(activityData['active_minutes']),
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading activity data: $e');
+    }
+  }
+  
+  Future<void> _loadWeightData() async {
+    try {
+      // Get the latest weight data
+      final QuerySnapshot weightSnapshot = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: _userId)
+          .orderBy('timestamp', descending: true)
+          .limit(2) // Get current and previous for change calculation
+          .get();
+      
+      if (weightSnapshot.docs.isEmpty) {
+        return;
+      }
+      
+      final currentWeightData = weightSnapshot.docs.first.data() as Map<String, dynamic>;
+      double currentWeight = _parseDoubleFromDynamic(currentWeightData['current']);
+      double bmi = _parseDoubleFromDynamic(currentWeightData['bmi']);
+      
+      // Calculate change if we have previous data
+      double change = 0;
+      if (weightSnapshot.docs.length > 1) {
+        final previousWeightData = weightSnapshot.docs[1].data() as Map<String, dynamic>;
+        double previousWeight = _parseDoubleFromDynamic(previousWeightData['current']);
+        if (previousWeight > 0) {
+          change = currentWeight - previousWeight;
+        }
+      }
+      
+      // Determine weight status based on BMI
+      String weightStatus = 'Normal';
+      if (bmi < 18.5) {
+        weightStatus = 'Underweight';
+      } else if (bmi >= 18.5 && bmi < 25) {
+        weightStatus = 'Normal';
+      } else if (bmi >= 25 && bmi < 30) {
+        weightStatus = 'Overweight';
+      } else if (bmi >= 30) {
+        weightStatus = 'Obese';
+      }
+      
+      // Update weight data
+      if (mounted) {
+        setState(() {
+          _healthData['weight'] = {
+            'current': currentWeight,
+            'change': change,
+            'bmi': bmi,
+            'status': weightStatus,
+          };
+        });
+      }
+    } catch (e) {
+      print('Error loading weight data: $e');
+    }
+  }
+  
+  Future<void> _loadWeeklyTrends() async {
+    try {
+      final DateTime now = DateTime.now();
+      final DateTime sevenDaysAgo = now.subtract(const Duration(days: 7));
+
+      // Query snapshots
+      final vitalSignsSnapshot = await _firestore
+          .collection('vital_signs')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      final activitySnapshot = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      final weightSnapshot = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: _userId)
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(sevenDaysAgo))
+          .where('timestamp', isLessThan: Timestamp.fromDate(now))
+          .orderBy('timestamp', descending: true)
+          .get();
+
+      // Create map for aggregation
+      Map<String, Map<String, dynamic>> dailyData = {};
+      List<String> dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+      for (int i = 0; i < 7; i++) {
+        final date = now.subtract(Duration(days: 6 - i));
+        final dayStr = DateFormat('E').format(date);
+
+        dailyData[dayStr] = {
+          'day': dayStr,
+          'steps': 0,
+          'weight': 0.0,
+          'systolicSum': 0,
+          'systolicCount': 0,
+          'stepsSum': 0,
+          'stepsCount': 0,
+          'weightSum': 0.0,
+          'weightCount': 0,
+        };
+      }
+
+      // Process vitals - with safe parsing
+      for (var doc in vitalSignsSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final systolic = _parseIntFromDynamic(data['systolic_BP']);
+
+        if (timestamp != null && systolic > 0) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['systolicSum'] += systolic;
+            dailyData[dayStr]!['systolicCount'] += 1;
+          }
+        }
+      }
+
+      // Process activity - with safe parsing
+      for (var doc in activitySnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final steps = _parseIntFromDynamic(data['steps']);
+
+        if (timestamp != null) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['stepsSum'] += steps;
+            dailyData[dayStr]!['stepsCount'] += 1;
+          }
+        }
+      }
+
+      // Process weight - with safe parsing
+      for (var doc in weightSnapshot.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final timestamp = data['timestamp'] as Timestamp?;
+        final current = _parseDoubleFromDynamic(data['current']);
+
+        if (timestamp != null && current > 0) {
+          final dayStr = DateFormat('E').format(timestamp.toDate());
+          if (dailyData.containsKey(dayStr)) {
+            dailyData[dayStr]!['weightSum'] += current;
+            dailyData[dayStr]!['weightCount'] += 1;
+          }
+        }
+      }
+
+      // Finalize daily stats
+      List<Map<String, dynamic>> weeklyStats = dailyData.values.map((dayData) {
+        return {
+          'day': dayData['day'],
+          'systolic': dayData['systolicCount'] > 0
+              ? (dayData['systolicSum'] / dayData['systolicCount']).round()
+              : 0,
+          'steps': dayData['stepsCount'] > 0
+              ? (dayData['stepsSum'] / dayData['stepsCount']).round()
+              : 0,
+          'weight': dayData['weightCount'] > 0
+              ? (dayData['weightSum'] / dayData['weightCount']).toStringAsFixed(1)
+              : '0.0',
+        };
+      }).toList();
+
+      // Sort by day order
+      weeklyStats.sort((a, b) =>
+          dayOrder.indexOf(a['day']) - dayOrder.indexOf(b['day']));
+
+      // Set state
+      if (mounted) {
+        setState(() {
+          _weeklyStats = weeklyStats;
+        });
+      }
+    } catch (e) {
+      print('Error loading weekly trends: $e');
+    }
   }
 
   @override
@@ -88,27 +441,30 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Syncing data...'))
               );
+              _loadUserHealthData();
             },
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildCategoryTabs(),
-          Expanded(
-            // Use TabBarView to switch content based on selected tab
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildOverviewContent(),
-                _buildBloodPressureContent(),
-                _buildActivityContent(),
-                _buildWeightContent(),
-              ],
-            ),
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator()) 
+        : Column(
+            children: [
+              _buildCategoryTabs(),
+              Expanded(
+                // Use TabBarView to switch content based on selected tab
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildOverviewContent(),
+                    _buildBloodPressureContent(),
+                    _buildActivityContent(),
+                    _buildWeightContent(),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
       bottomNavigationBar: _buildBottomNavBar(),
     );
   }
@@ -254,9 +610,9 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Your health metrics are looking good today!',
-              style: TextStyle(
+            Text(
+              _getHealthSummary(),
+              style: const TextStyle(
                 fontSize: 15,
                 color: Colors.black87,
               ),
@@ -266,8 +622,36 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
       ),
     );
   }
+  
+  String _getHealthSummary() {
+    // Generate a dynamic health summary based on the data
+    final bpStatus = _healthData['bloodPressure']['status'];
+    final steps = _healthData['activity']['steps'];
+    final weightStatus = _healthData['weight']['status'];
+    
+    if (bpStatus == 'Optimal' && steps >= 8000 && weightStatus == 'Normal') {
+      return 'Your health metrics are looking great today! Keep it up!';
+    } else if (bpStatus == 'Optimal' || steps >= 8000 || weightStatus == 'Normal') {
+      return 'Your health metrics are looking good today with some room for improvement.';
+    } else {
+      return 'There are opportunities to improve your health metrics today.';
+    }
+  }
 
   Widget _buildBloodPressureCard() {
+    final bpData = _healthData['bloodPressure'];
+    final bpStatus = bpData['status'];
+    
+    // Set color based on BP status
+    Color statusColor = Colors.green;
+    if (bpStatus == 'Elevated') {
+      statusColor = Colors.amber;
+    } else if (bpStatus == 'Stage 1') {
+      statusColor = Colors.orange;
+    } else if (bpStatus == 'Stage 2') {
+      statusColor = Colors.red;
+    }
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -310,11 +694,11 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.green,
+                    color: statusColor,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    _healthData['bloodPressure']['status'],
+                    bpStatus,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -330,8 +714,8 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               children: [
                 _buildTimeOfDayReadings(
                   title: 'Morning',
-                  systolic: _healthData['bloodPressure']['morningAvgSys'],
-                  diastolic: _healthData['bloodPressure']['morningAvgDia'],
+                  systolic: bpData['morningAvgSys'],
+                  diastolic: bpData['morningAvgDia'],
                 ),
                 Container(
                   height: 80,
@@ -340,8 +724,8 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                 ),
                 _buildTimeOfDayReadings(
                   title: 'Evening',
-                  systolic: _healthData['bloodPressure']['eveningAvgSys'],
-                  diastolic: _healthData['bloodPressure']['eveningAvgDia'],
+                  systolic: bpData['eveningAvgSys'],
+                  diastolic: bpData['eveningAvgDia'],
                 ),
               ],
             ),
@@ -421,6 +805,15 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
   }
 
   Widget _buildActivityCard() {
+    final activityData = _healthData['activity'];
+    final steps = activityData['steps'];
+    final distance = activityData['distance'].toDouble();
+    final calories = activityData['calories'];
+    final activeMinutes = activityData['activeMinutes'];
+    
+    // Calculate progress for active minutes (assuming 150 min/week goal = ~22 min/day)
+    final activeMinutesProgress = (activeMinutes / 22).clamp(0.0, 1.0);
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -463,38 +856,38 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               children: [
                 _buildActivityMetric(
                   icon: Icons.directions_walk,
-                  value: _healthData['activity']['steps'].toString(),
+                  value: steps.toString(),
                   label: 'Steps',
                   color: Colors.green,
                 ),
                 _buildActivityMetric(
                   icon: Icons.straighten,
-                  value: '${_healthData['activity']['distance']} km',
+                  value: '${distance.toStringAsFixed(1)} km',
                   label: 'Distance',
                   color: Colors.blue,
                 ),
                 _buildActivityMetric(
                   icon: Icons.local_fire_department,
-                  value: '${_healthData['activity']['calories']}',
+                  value: calories.toString(),
                   label: 'Calories',
                   color: Colors.orange,
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            const Center(
+            Center(
               child: LinearProgressIndicator(
-                value: 0.68,
-                backgroundColor: Color(0xFFE0E0E0),
+                value: activeMinutesProgress,
+                backgroundColor: const Color(0xFFE0E0E0),
                 color: Colors.green,
                 minHeight: 8,
-                borderRadius: BorderRadius.all(Radius.circular(4)),
+                borderRadius: const BorderRadius.all(Radius.circular(4)),
               ),
             ),
             const SizedBox(height: 8),
             Center(
               child: Text(
-                '${_healthData['activity']['activeMinutes']} active minutes today',
+                '$activeMinutes active minutes today',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[600],
@@ -537,6 +930,22 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
   }
 
   Widget _buildWeightCard() {
+    final weightData = _healthData['weight'];
+    final currentWeight = weightData['current'].toDouble();
+    final change = weightData['change'].toDouble();
+    final bmi = weightData['bmi'].toDouble();
+    final status = weightData['status'];
+    
+    // Determine color for weight status
+    Color statusColor = Colors.teal;
+    if (status == 'Underweight') {
+      statusColor = Colors.amber;
+    } else if (status == 'Overweight') {
+      statusColor = Colors.orange;
+    } else if (status == 'Obese') {
+      statusColor = Colors.red;
+    }
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -579,11 +988,11 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.teal,
+                    color: statusColor,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    _healthData['weight']['status'],
+                    status,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -598,18 +1007,18 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildWeightMetric(
-                  value: '${_healthData['weight']['current']}',
+                  value: currentWeight.toStringAsFixed(1),
                   unit: 'kg',
                   label: 'Current Weight',
                 ),
                 _buildWeightMetric(
-                  value: '${_healthData['weight']['change']}',
+                  value: change.toStringAsFixed(1),
                   unit: 'kg',
                   label: 'Weekly Change',
-                  isNegative: _healthData['weight']['change'] < 0,
+                  isNegative: change < 0,
                 ),
                 _buildWeightMetric(
-                  value: '${_healthData['weight']['bmi']}',
+                  value: bmi.toStringAsFixed(1),
                   unit: '',
                   label: 'BMI',
                 ),
@@ -681,6 +1090,23 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
   }
 
   Widget _buildWeeklyTrendsChart() {
+    // Check if we have data for the chart
+    if (_weeklyStats.isEmpty) {
+      return Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(
+            child: Text('No weekly trend data available'),
+          ),
+        ),
+      );
+    }
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -719,7 +1145,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               padding: const EdgeInsets.only(right: 16, top: 16),
               child: LineChart(
                 LineChartData(
-                  gridData: FlGridData(show: false),
+                  gridData: const FlGridData(show: false),
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -757,10 +1183,10 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                         reservedSize: 30,
                       ),
                     ),
-                    rightTitles: AxisTitles(
+                    rightTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
-                    topTitles: AxisTitles(
+                    topTitles: const AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                   ),
@@ -775,7 +1201,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                       color: Colors.indigo,
                       barWidth: 3,
                       isStrokeCapRound: true,
-                      dotData: FlDotData(show: false),
+                      dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
                         color: Colors.indigo.withOpacity(0.1),
@@ -791,7 +1217,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
                       color: Colors.green,
                       barWidth: 3,
                       isStrokeCapRound: true,
-                      dotData: FlDotData(show: false),
+                      dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
                         color: Colors.green.withOpacity(0.1),
@@ -869,26 +1295,159 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
             ),
             const SizedBox(height: 16),
             _buildInsightItem(
-              icon: Icons.check_circle_outline,
-              text: 'Your blood pressure readings are in the optimal range.',
-              color: Colors.green,
+              icon: _getInsightIconForBP(),
+              text: _getInsightTextForBP(),
+              color: _getInsightColorForBP(),
             ),
             const SizedBox(height: 12),
             _buildInsightItem(
-              icon: Icons.info_outline,
-              text: 'Try to reach 10,000 steps daily for better heart health.',
-              color: Colors.blue,
+              icon: _getInsightIconForActivity(),
+              text: _getInsightTextForActivity(),
+              color: _getInsightColorForActivity(),
             ),
             const SizedBox(height: 12),
             _buildInsightItem(
-              icon: Icons.trending_down,
-              text: 'Your weight has decreased by 0.3kg this week - great progress!',
-              color: Colors.green,
+              icon: _getInsightIconForWeight(),
+              text: _getInsightTextForWeight(),
+              color: _getInsightColorForWeight(),
             ),
           ],
         ),
       ),
     );
+  }
+
+  // Dynamic insight generators for blood pressure
+  IconData _getInsightIconForBP() {
+    final bpStatus = _healthData['bloodPressure']['status'];
+    if (bpStatus == 'Optimal') {
+      return Icons.check_circle_outline;
+    } else if (bpStatus == 'Elevated') {
+      return Icons.info_outline;
+    } else {
+      return Icons.warning_amber_outlined;
+    }
+  }
+
+  String _getInsightTextForBP() {
+    final bpStatus = _healthData['bloodPressure']['status'];
+    
+    if (bpStatus == 'Optimal') {
+      return 'Your blood pressure readings are in the optimal range.';
+    } else if (bpStatus == 'Elevated') {
+      return 'Your blood pressure is slightly elevated. Consider reducing salt intake.';
+    } else if (bpStatus == 'Stage 1') {
+      return 'Your blood pressure is in Stage 1 hypertension. Consider lifestyle changes.';
+    } else {
+      return 'Your blood pressure is elevated. Please consult with your healthcare provider.';
+    }
+  }
+
+  Color _getInsightColorForBP() {
+    final bpStatus = _healthData['bloodPressure']['status'];
+    if (bpStatus == 'Optimal') {
+      return Colors.green;
+    } else if (bpStatus == 'Elevated') {
+      return Colors.amber;
+    } else if (bpStatus == 'Stage 1') {
+      return Colors.orange;
+    } else {
+      return Colors.red;
+    }
+  }
+
+  // Dynamic insight generators for activity
+  IconData _getInsightIconForActivity() {
+    final steps = _healthData['activity']['steps'];
+    if (steps >= 10000) {
+      return Icons.check_circle_outline;
+    } else if (steps >= 7000) {
+      return Icons.info_outline;
+    } else {
+      return Icons.directions_walk;
+    }
+  }
+
+  String _getInsightTextForActivity() {
+    final steps = _healthData['activity']['steps'];
+    
+    if (steps >= 10000) {
+      return 'Great job! You\'ve reached your step goal of 10,000 steps.';
+    } else if (steps >= 7000) {
+      return 'You\'re making good progress. Try to reach 10,000 steps daily for better heart health.';
+    } else {
+      return 'Try to increase your daily steps to at least 7,000-10,000 for better health.';
+    }
+  }
+
+  Color _getInsightColorForActivity() {
+    final steps = _healthData['activity']['steps'];
+    if (steps >= 10000) {
+      return Colors.green;
+    } else if (steps >= 7000) {
+      return Colors.blue;
+    } else {
+      return Colors.orange;
+    }
+  }
+
+  // Dynamic insight generators for weight
+  IconData _getInsightIconForWeight() {
+    final weightStatus = _healthData['weight']['status'];
+    final change = _healthData['weight']['change'];
+    
+    if (weightStatus == 'Normal' || (weightStatus != 'Normal' && change < 0)) {
+      return Icons.trending_down;
+    } else if (weightStatus == 'Underweight') {
+      return Icons.trending_up;
+    } else {
+      return Icons.info_outline;
+    }
+  }
+
+  String _getInsightTextForWeight() {
+    final weightStatus = _healthData['weight']['status'];
+    final change = _healthData['weight']['change'];
+    final bmi = _healthData['weight']['bmi'];
+    
+    if (weightStatus == 'Normal') {
+      if (change < 0) {
+        return 'Your weight has decreased by ${change.abs().toStringAsFixed(1)}kg - maintaining a healthy BMI!';
+      } else if (change > 0) {
+        return 'Your weight has increased by ${change.toStringAsFixed(1)}kg, but your BMI is still in the healthy range.';
+      } else {
+        return 'Your weight is stable and your BMI is in the healthy range.';
+      }
+    } else if (weightStatus == 'Underweight') {
+      return 'Your BMI is ${bmi.toStringAsFixed(1)}, which is considered underweight. Consider consulting a healthcare provider.';
+    } else if (weightStatus == 'Overweight') {
+      if (change < 0) {
+        return 'Good progress! Your weight has decreased by ${change.abs().toStringAsFixed(1)}kg. Keep working toward a healthier BMI.';
+      } else {
+        return 'Your BMI is ${bmi.toStringAsFixed(1)}, which is in the overweight range. Consider increasing activity.';
+      }
+    } else {
+      if (change < 0) {
+        return 'Good progress! Your weight has decreased by ${change.abs().toStringAsFixed(1)}kg. Continue working with your healthcare provider.';
+      } else {
+        return 'Your BMI is ${bmi.toStringAsFixed(1)}, which is in the obese range. Please consult with your healthcare provider.';
+      }
+    }
+  }
+
+  Color _getInsightColorForWeight() {
+    final weightStatus = _healthData['weight']['status'];
+    final change = _healthData['weight']['change'];
+    
+    if (weightStatus == 'Normal') {
+      return Colors.green;
+    } else if (weightStatus == 'Underweight') {
+      return Colors.amber;
+    } else if (change < 0) {
+      return Colors.green; // Weight loss if overweight/obese is positive
+    } else {
+      return Colors.orange;
+    }
   }
 
   Widget _buildInsightItem({

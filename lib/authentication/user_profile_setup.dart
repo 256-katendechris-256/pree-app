@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:intl/intl.dart';
 import 'health_questionnaire.dart';
 
 class UserProfileSetupScreen extends StatefulWidget {
@@ -12,13 +15,45 @@ class _UserProfileSetupScreenState extends State<UserProfileSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   DateTime? _dateOfBirth;
   String _gender = 'Female';
+  bool _isLoading = false;
+  
+  // Firebase instances
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fill the email if the user signed in with Google
+    _prefillUserData();
+  }
+
+  void _prefillUserData() {
+    final user = _auth.currentUser;
+    if (user != null) {
+      // Pre-fill name and email if available from auth
+      if (user.displayName != null && _nameController.text.isEmpty) {
+        _nameController.text = user.displayName!;
+      }
+      
+      if (user.email != null && _emailController.text.isEmpty) {
+        _emailController.text = user.email!;
+      }
+      
+      if (user.phoneNumber != null && _phoneController.text.isEmpty) {
+        _phoneController.text = user.phoneNumber!;
+      }
+    }
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -43,6 +78,83 @@ class _UserProfileSetupScreenState extends State<UserProfileSetupScreen> {
       setState(() {
         _dateOfBirth = picked;
       });
+    }
+  }
+
+  Future<void> _saveUserProfile() async {
+    if (!_formKey.currentState!.validate() || _dateOfBirth == null) {
+      if (_dateOfBirth == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select your date of birth'),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('User not logged in');
+      }
+
+      // Format the date of birth as a string (DD/MM/YYYY)
+      final formattedDob = DateFormat('dd/MM/yyyy').format(_dateOfBirth!);
+      
+      // Get the phone number from the current user or set it to empty
+      final phoneNumber = user.phoneNumber ?? '';
+
+      // Create user profile data
+      final userData = {
+        'full_name': _nameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'date_of_birth': formattedDob,
+        'gender': _gender,
+        'phone_number': phoneNumber,
+        'password': '', // Not storing actual password, just an empty field for schema compliance
+        'kin_id': '', // Default empty value or you can generate a random ID here
+        'timestamp': FieldValue.serverTimestamp(),
+      };
+
+      // Save user data to Firestore
+      await _firestore.collection('user').doc(user.uid).set(userData);
+
+      // Update user display name in Firebase Auth
+      await user.updateDisplayName(_nameController.text.trim());
+      
+      // If email isn't set in Auth but provided in form, update it
+      if (user.email == null || user.email!.isEmpty) {
+        await user.updateEmail(_emailController.text.trim());
+      }
+
+      // Navigate to health questionnaire after successful save
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const HealthQuestionnaireScreen(),
+          ),
+        );
+      }
+    } catch (e) {
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error saving profile: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -220,22 +332,41 @@ class _UserProfileSetupScreenState extends State<UserProfileSetupScreen> {
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: RadioListTile<String>(
-                          title: const Text('Female'),
-                          value: 'Female',
-                          groupValue: _gender,
-                          activeColor: Theme.of(context).primaryColor,
-                          onChanged: (value) {
-                            setState(() {
-                              _gender = value!;
-                            });
-                          },
-                        ),
+                      RadioListTile<String>(
+                        title: const Text('Female'),
+                        value: 'Female',
+                        groupValue: _gender,
+                        activeColor: Theme.of(context).primaryColor,
+                        onChanged: (value) {
+                          setState(() {
+                            _gender = value!;
+                          });
+                        },
                       ),
-
+                      RadioListTile<String>(
+                        title: const Text('Male'),
+                        value: 'Male',
+                        groupValue: _gender,
+                        activeColor: Theme.of(context).primaryColor,
+                        onChanged: (value) {
+                          setState(() {
+                            _gender = value!;
+                          });
+                        },
+                      ),
+                      RadioListTile<String>(
+                        title: const Text('Other'),
+                        value: 'Other',
+                        groupValue: _gender,
+                        activeColor: Theme.of(context).primaryColor,
+                        onChanged: (value) {
+                          setState(() {
+                            _gender = value!;
+                          });
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -243,23 +374,7 @@ class _UserProfileSetupScreenState extends State<UserProfileSetupScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      if (_formKey.currentState!.validate() && _dateOfBirth != null) {
-                        // Save user profile data and navigate to health questionnaire
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const HealthQuestionnaireScreen(),
-                          ),
-                        );
-                      } else if (_dateOfBirth == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Please select your date of birth'),
-                          ),
-                        );
-                      }
-                    },
+                    onPressed: _isLoading ? null : _saveUserProfile,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).primaryColor,
                       padding: const EdgeInsets.symmetric(vertical: 15),
@@ -267,14 +382,16 @@ class _UserProfileSetupScreenState extends State<UserProfileSetupScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: const Text(
-                      'Continue',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'Continue',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                   ),
                 ),
               ],

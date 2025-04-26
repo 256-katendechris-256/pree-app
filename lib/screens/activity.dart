@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../screens/dashboard.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'overview.dart';
+import '../screens/dashboard.dart'; // Import DashboardScreen
+import '../screens/insight_screen.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -14,26 +18,24 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
   int _selectedIndex = 0;
   String _selectedCategory = 'Activity';
   bool _isNavigating = false;
+  bool _isLoading = true;
   late TabController _tabController;
 
+  // Firebase instances
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
   // Activity data
-  final Map<String, dynamic> _activityData = {
-    'steps': 7358,
-    'calories': 345,
-    'distance': 4.6,
+  Map<String, dynamic> _activityData = {
+    'steps': 0,
+    'calories': 0,
+    'distance': 0.0,
+    'active_minutes': 0,
     'goal': 10000,
   };
 
   // Weekly activity data
-  final List<Map<String, dynamic>> _weeklyActivity = [
-    {'day': 'Mon', 'steps': 8234, 'calories': 380, 'distance': 5.2},
-    {'day': 'Tue', 'steps': 9512, 'calories': 425, 'distance': 6.1},
-    {'day': 'Wed', 'steps': 7869, 'calories': 362, 'distance': 5.0},
-    {'day': 'Thu', 'steps': 10254, 'calories': 467, 'distance': 6.5},
-    {'day': 'Fri', 'steps': 8543, 'calories': 390, 'distance': 5.5},
-    {'day': 'Sat', 'steps': 6425, 'calories': 298, 'distance': 4.1},
-    {'day': 'Sun', 'steps': 7358, 'calories': 345, 'distance': 4.6},
-  ];
+  List<Map<String, dynamic>> _weeklyActivity = [];
 
   @override
   void initState() {
@@ -63,6 +65,220 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
         });
       }
     });
+
+    // Load activity data from Firebase
+    _loadActivityData();
+  }
+
+  Future<void> _loadActivityData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Get current user
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        // Handle not logged in state
+        _loadMockActivityData();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please log in to view your activity data')),
+        );
+        return;
+      }
+
+      String userId = currentUser.uid;
+
+      // Load latest activity data
+      await _fetchLatestActivity(userId);
+
+      // Load weekly activity data
+      await _fetchWeeklyActivity(userId);
+
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading activity data: $e');
+      _loadMockActivityData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading activity data: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchLatestActivity(String userId) async {
+    try {
+      // Get latest activity entry
+      var latestActivityDoc = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .limit(1)
+          .get();
+
+      if (latestActivityDoc.docs.isNotEmpty) {
+        var data = latestActivityDoc.docs.first.data();
+        
+        // Parse values, handling potential string values
+        int steps = int.tryParse(data['steps'] ?? '0') ?? 0;
+        int calories = int.tryParse(data['calories'] ?? '0') ?? 0;
+        double distance = double.tryParse(data['distance'] ?? '0.0') ?? 0.0;
+        int activeMinutes = int.tryParse(data['active_minutes'] ?? '0') ?? 0;
+        
+        // Get stored goal or use default
+        var userDoc = await _firestore
+            .collection('users')
+            .doc(userId)
+            .get();
+            
+        int goal = 10000; // Default goal
+        if (userDoc.exists) {
+          goal = userDoc.data()?['step_goal'] ?? 10000;
+        }
+        
+        if (mounted) {
+          setState(() {
+            _activityData = {
+              'steps': steps,
+              'calories': calories,
+              'distance': distance,
+              'active_minutes': activeMinutes,
+              'goal': goal,
+            };
+          });
+        }
+      }
+    } catch (e) {
+      print('Error fetching latest activity: $e');
+      throw e;
+    }
+  }
+
+  Future<void> _fetchWeeklyActivity(String userId) async {
+    try {
+      // Calculate date for 7 days ago
+      DateTime sevenDaysAgo = DateTime.now().subtract(const Duration(days: 7));
+      
+      // Get last 7 days of activity data
+      var weeklyActivityDocs = await _firestore
+          .collection('activity')
+          .where('user_id', isEqualTo: userId)
+          .where('timestamp', isGreaterThanOrEqualTo: sevenDaysAgo)
+          .orderBy('timestamp', descending: true)
+          .limit(7)
+          .get();
+
+      if (weeklyActivityDocs.docs.isNotEmpty) {
+        List<Map<String, dynamic>> weekActivity = [];
+        
+        // Create a map to store activity by day
+        Map<String, Map<String, dynamic>> activityByDay = {};
+        
+        for (var doc in weeklyActivityDocs.docs) {
+          var data = doc.data();
+          
+          // Extract date from timestamp for day grouping
+          Timestamp timestamp = data['timestamp'];
+          DateTime date = timestamp.toDate();
+          String day = DateFormat('E').format(date); // Day of week abbreviation
+          
+          // Parse values
+          int steps = int.tryParse(data['steps'] ?? '0') ?? 0;
+          int calories = int.tryParse(data['calories'] ?? '0') ?? 0;
+          double distance = double.tryParse(data['distance'] ?? '0.0') ?? 0.0;
+          
+          // Group by day (taking the latest entry for each day)
+          if (!activityByDay.containsKey(day)) {
+            activityByDay[day] = {
+              'day': day,
+              'steps': steps,
+              'calories': calories,
+              'distance': distance,
+              'timestamp': timestamp,
+            };
+          }
+        }
+        
+        // Convert map to list
+        weekActivity = activityByDay.values.toList();
+        
+        // Sort by day of week
+        final daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        weekActivity.sort((a, b) {
+          return daysOfWeek.indexOf(a['day']) - daysOfWeek.indexOf(b['day']);
+        });
+        
+        // If we don't have all 7 days, fill in missing days with zeros
+        if (weekActivity.length < 7) {
+          for (var day in daysOfWeek) {
+            if (!activityByDay.containsKey(day)) {
+              weekActivity.add({
+                'day': day,
+                'steps': 0,
+                'calories': 0,
+                'distance': 0.0,
+              });
+            }
+          }
+          
+          // Sort again after adding missing days
+          weekActivity.sort((a, b) {
+            return daysOfWeek.indexOf(a['day']) - daysOfWeek.indexOf(b['day']);
+          });
+        }
+        
+        if (mounted) {
+          setState(() {
+            _weeklyActivity = weekActivity;
+          });
+        }
+      } else {
+        // If no data, use mock data
+        _loadMockWeeklyData();
+      }
+    } catch (e) {
+      print('Error fetching weekly activity: $e');
+      _loadMockWeeklyData();
+      throw e;
+    }
+  }
+
+  void _loadMockActivityData() {
+    if (mounted) {
+      setState(() {
+        _activityData = {
+          'steps': 7358,
+          'calories': 345,
+          'distance': 4.6,
+          'active_minutes': 35,
+          'goal': 10000,
+        };
+        
+        _loadMockWeeklyData();
+        
+        _isLoading = false;
+      });
+    }
+  }
+  
+  void _loadMockWeeklyData() {
+    if (mounted) {
+      setState(() {
+        _weeklyActivity = [
+          {'day': 'Mon', 'steps': 8234, 'calories': 380, 'distance': 5.2},
+          {'day': 'Tue', 'steps': 9512, 'calories': 425, 'distance': 6.1},
+          {'day': 'Wed', 'steps': 7869, 'calories': 362, 'distance': 5.0},
+          {'day': 'Thu', 'steps': 10254, 'calories': 467, 'distance': 6.5},
+          {'day': 'Fri', 'steps': 8543, 'calories': 390, 'distance': 5.5},
+          {'day': 'Sat', 'steps': 6425, 'calories': 298, 'distance': 4.1},
+          {'day': 'Sun', 'steps': 7358, 'calories': 345, 'distance': 4.6},
+        ];
+      });
+    }
   }
 
   @override
@@ -94,6 +310,7 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: () {
+              _loadActivityData();
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Syncing data...'))
               );
@@ -105,7 +322,9 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
         children: [
           _buildCategoryTabs(),
           Expanded(
-            child: _getContentForSelectedCategory(),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
+                : _getContentForSelectedCategory(),
           ),
         ],
       ),
@@ -186,6 +405,17 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
           child: Text('Loading Blood Pressure Screen...'),
         ),
       );
+    } else if (_selectedCategory == 'Weight' && !_isNavigating) {
+      _isNavigating = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pop(context);
+      });
+      return Container(
+        color: Colors.white,
+        child: const Center(
+          child: Text('Loading Weight Screen...'),
+        ),
+      );
     } else if (_selectedCategory == 'Overview' && !_isNavigating) {
       _isNavigating = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -206,29 +436,28 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
       case 'Activity':
         return _buildActivityContent();
       case 'Weight':
-        return Container(
-          color: Colors.white,
-          child: const Center(
-            child: Text('Weight Screen is under development'),
-          ),
-        );
+        return _buildActivityContent();
       default:
         return _buildActivityContent();
     }
   }
 
   Widget _buildActivityContent() {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildStatusCard(),
-          _buildActivitySummaryCard(),
-          _buildWeeklyChart(),
-          _buildGoalProgressCard(),
-          _buildActionButtons(),
-          const SizedBox(height: 20),
-        ],
+    return RefreshIndicator(
+      onRefresh: _loadActivityData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildStatusCard(),
+            _buildActivitySummaryCard(),
+            _buildWeeklyChart(),
+            _buildGoalProgressCard(),
+            _buildActionButtons(),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
@@ -331,6 +560,16 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
                 _buildActivityItem('Distance', '${_activityData['distance']}', 'km', Colors.green),
               ],
             ),
+            if (_activityData.containsKey('active_minutes'))
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildActivityItem('Active Minutes', '${_activityData['active_minutes']}', 'min', Colors.purple),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
@@ -411,74 +650,80 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
             Container(
               height: 200,
               padding: const EdgeInsets.only(right: 16, top: 16),
-              child: BarChart(
-                BarChartData(
-                  gridData: FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 && value.toInt() < _weeklyActivity.length) {
-                            return Text(
-                              _weeklyActivity[value.toInt()]['day'],
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 10,
-                              ),
-                            );
-                          }
-                          return const Text('');
-                        },
-                        reservedSize: 22,
-                      ),
-                    ),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value % 2000 == 0 && value <= 10000) {
-                            return Text(
-                              '${value ~/ 1000}k',
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 10,
-                              ),
-                            );
-                          }
-                          return const Text('');
-                        },
-                        reservedSize: 30,
-                      ),
-                    ),
-                    rightTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  barGroups: List.generate(_weeklyActivity.length, (index) {
-                    return BarChartGroupData(
-                      x: index,
-                      barRods: [
-                        BarChartRodData(
-                          toY: _weeklyActivity[index]['steps'].toDouble(),
-                          color: DateTime.now().weekday - 1 == index ? Colors.indigo : Colors.indigo.withOpacity(0.6),
-                          width: 15,
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(6),
-                            topRight: Radius.circular(6),
-                          ),
+              child: _weeklyActivity.isEmpty
+                ? const Center(child: Text('No activity data available for this week'))
+                : BarChart(
+                  BarChartData(
+                    gridData: const FlGridData(show: false),
+                    titlesData: FlTitlesData(
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            if (value.toInt() >= 0 && value.toInt() < _weeklyActivity.length) {
+                              return Text(
+                                _weeklyActivity[value.toInt()]['day'],
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 10,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                          reservedSize: 22,
                         ),
-                      ],
-                    );
-                  }),
-                  minY: 0,
-                  maxY: 12000,
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          getTitlesWidget: (value, meta) {
+                            if (value % 2000 == 0 && value <= 10000) {
+                              return Text(
+                                '${value ~/ 1000}k',
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 10,
+                                ),
+                              );
+                            }
+                            return const Text('');
+                          },
+                          reservedSize: 30,
+                        ),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    barGroups: List.generate(_weeklyActivity.length, (index) {
+                      // Determine if this is today's bar
+                      bool isToday = _weeklyActivity[index]['day'] == 
+                          DateFormat('E').format(DateTime.now());
+                      
+                      return BarChartGroupData(
+                        x: index,
+                        barRods: [
+                          BarChartRodData(
+                            toY: _weeklyActivity[index]['steps']?.toDouble() ?? 0,
+                            color: isToday ? Colors.indigo : Colors.indigo.withOpacity(0.6),
+                            width: 15,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(6),
+                              topRight: Radius.circular(6),
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
+                    minY: 0,
+                    maxY: 12000,
+                  ),
                 ),
-              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -634,7 +879,7 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
           const SizedBox(width: 10),
           Expanded(
             child: ElevatedButton.icon(
-              onPressed: () {},
+              onPressed: () => _editStepGoal(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
@@ -658,17 +903,242 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
     );
   }
 
-  void _addManualActivity() {
-    // Show a dialog to add activity manually
-    showDialog(
+  void _addManualActivity() async {
+    // Check if user is authenticated
+    User? currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to add activity data')),
+      );
+      return;
+    }
+    
+    // Show dialog to add activity manually
+    final TextEditingController stepsController = TextEditingController();
+    final TextEditingController caloriesController = TextEditingController();
+    final TextEditingController distanceController = TextEditingController();
+    final TextEditingController activeMinutesController = TextEditingController();
+    
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Add Activity'),
-        content: const Text('This feature is coming soon!'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: stepsController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Steps',
+                  hintText: '0',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: caloriesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Calories (kcal)',
+                  hintText: '0',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: distanceController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  labelText: 'Distance (km)',
+                  hintText: '0.0',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: activeMinutesController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Active Minutes',
+                  hintText: '0',
+                ),
+              ),
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              // This continues from where the previous code snippet left off
+
+              // Validate input
+              if (stepsController.text.isEmpty && 
+                  caloriesController.text.isEmpty && 
+                  distanceController.text.isEmpty && 
+                  activeMinutesController.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter at least one value')),
+                );
+                return;
+              }
+              
+              try {
+                // Parse input values
+                int steps = int.tryParse(stepsController.text) ?? 0;
+                int calories = int.tryParse(caloriesController.text) ?? 0;
+                double distance = double.tryParse(distanceController.text) ?? 0.0;
+                int activeMinutes = int.tryParse(activeMinutesController.text) ?? 0;
+                
+                // Save to Firestore
+                await _saveActivityToFirebase(
+                  steps: steps,
+                  calories: calories,
+                  distance: distance,
+                  activeMinutes: activeMinutes,
+                );
+                
+                Navigator.pop(context);
+                
+              } catch (e) {
+                print('Error saving activity: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error adding activity: $e')),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.indigo,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _saveActivityToFirebase({
+    required int steps,
+    required int calories,
+    required double distance,
+    required int activeMinutes,
+  }) async {
+    try {
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      // Get current date and time
+      final now = DateTime.now();
+      
+      // Create activity document
+      await _firestore.collection('activity').add({
+        'steps': steps.toString(),
+        'calories': calories.toString(),
+        'distance': distance.toString(),
+        'active_minutes': activeMinutes.toString(),
+        'timestamp': now,
+        'user_id': currentUser.uid,
+      });
+      
+      // Update local state
+      setState(() {
+        _activityData = {
+          'steps': steps,
+          'calories': calories,
+          'distance': distance,
+          'active_minutes': activeMinutes,
+          'goal': _activityData['goal'],
+        };
+      });
+      
+      // Refresh data to update weekly chart
+      _fetchWeeklyActivity(currentUser.uid);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Activity saved successfully')),
+      );
+    } catch (e) {
+      print('Error saving activity to Firebase: $e');
+      throw e;
+    }
+  }
+
+  void _editStepGoal() async {
+    // Check if user is authenticated
+    User? currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to edit your goal')),
+      );
+      return;
+    }
+    
+    // Show dialog to edit goal
+    final TextEditingController goalController = TextEditingController(
+      text: _activityData['goal'].toString(),
+    );
+    
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Step Goal'),
+        content: TextField(
+          controller: goalController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Daily Step Goal',
+            hintText: '10000',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              // Validate and save
+              String goalStr = goalController.text.trim();
+              if (goalStr.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid goal')),
+                );
+                return;
+              }
+              
+              int goal = int.tryParse(goalStr) ?? 10000;
+              
+              try {
+                // Save to Firebase
+                await _firestore
+                    .collection('users')
+                    .doc(currentUser.uid)
+                    .set({'step_goal': goal}, SetOptions(merge: true));
+                
+                // Update local state
+                setState(() {
+                  _activityData['goal'] = goal;
+                });
+                
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Step goal updated successfully')),
+                );
+              } catch (e) {
+                print('Error updating goal: $e');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error updating goal: $e')),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.indigo,
+            ),
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -704,6 +1174,32 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
         setState(() {
           _selectedIndex = index;
         });
+
+        // Navigate to appropriate screen based on index
+        switch (index) {
+          case 0: // Home
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const DashboardScreen()),
+            );
+            break;
+          case 1: // Reports
+            // You can implement navigation to Reports screen here
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Navigating to Reports')),
+            );
+            break;
+          case 2: // Insights - already on this screen
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (context) => const InsightsScreen()),
+            );
+            break;
+          case 3: // Settings
+            // You can implement navigation to Settings screen here
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Navigating to Settings')),
+            );
+            break;
+        }
       },
     );
   }
