@@ -9,6 +9,10 @@ import '../screens/activity.dart';
 import '../screens/diary.dart';
 import '../screens/overview.dart';
 import '../screens/weight.dart';
+import '../widgets/bottom_nav_bar.dart'; // Adjust path
+import 'reports_screen.dart';
+import 'insight_screen.dart';
+import 'settings_screen.dart';
 
 
 class DashboardScreen extends StatefulWidget {
@@ -19,7 +23,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> with TickerProviderStateMixin {
-  int _selectedIndex = 0;
+  int _selectedNavIndex = 0;
   String _selectedCategory = 'Blood Pressure';
   bool _isNavigating = false;
   bool _isLoading = true;
@@ -43,21 +47,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   };
 
   // Activity data
-  Map<String, dynamic> _activityData = {
-    'steps': 0,
-    'calories': 0,
-    'distance': 0.0,
-    'active_minutes': 0,
-  };
 
   // Weight data
-  Map<String, dynamic> _weightData = {
-    'weight': 0.0,
-    'bmi': 0.0,
-    'status': '',
-    'change': '',
-    'date': DateTime.now(),
-  };
 
   @override
   void initState() {
@@ -253,12 +244,6 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         
         if (mounted) {
           setState(() {
-            _activityData = {
-              'steps': steps,
-              'calories': calories,
-              'distance': distance,
-              'active_minutes': activeMinutes,
-            };
           });
         }
       }
@@ -290,13 +275,6 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         
         if (mounted) {
           setState(() {
-            _weightData = {
-              'weight': weight,
-              'bmi': bmi,
-              'status': status,
-              'change': change,
-              'date': timestamp.toDate(),
-            };
           });
         }
       }
@@ -330,21 +308,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         ];
         
         // Mock activity data
-        _activityData = {
-          'steps': 7358,
-          'calories': 345,
-          'distance': 4.6,
-          'active_minutes': 35,
-        };
         
         // Mock weight data
-        _weightData = {
-          'weight': 75.5,
-          'bmi': 24.2,
-          'status': 'Normal',
-          'change': '-0.3',
-          'date': DateTime.now(),
-        };
         
         _isLoading = false;
       });
@@ -403,7 +368,37 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         onPressed: () => _addNewEntry(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
-      bottomNavigationBar: _buildBottomNavBar(),
+      bottomNavigationBar: BottomNavBar(
+        selectedIndex: _selectedNavIndex,
+        onItemTapped: (index) {
+          if (index == _selectedNavIndex) {
+            return; // Already on Dashboard screen
+          }
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          switch (index) {
+            case 0: // Home
+              // Stay on this screen
+              break;
+            case 1: // Reports
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const ReportsScreen()),
+              );
+              break;
+            case 2: // Insights
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const InsightsScreen()),
+              );
+              break;
+            case 3: // Settings
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+              break;
+          }
+        },
+      ),
     );
   }
 
@@ -1146,39 +1141,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     }
   }
 
-  Widget _buildBottomNavBar() {
-    return BottomNavigationBar(
-      currentIndex: _selectedIndex,
-      selectedItemColor: Colors.indigo,
-      unselectedItemColor: Colors.grey,
-      showUnselectedLabels: true,
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.insert_chart),
-          label: 'Reports',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.settings),
-          label: 'Settings',
-        ),
-      ],
-      onTap: (index) {
-        setState(() {
-          _selectedIndex = index;
-        });
-      },
-    );
-  }
-
+  
   // Helper function to calculate blood pressure status
   String _calculateStatus(int systolic, int diastolic) {
     if (systolic < 120 && diastolic < 80) {

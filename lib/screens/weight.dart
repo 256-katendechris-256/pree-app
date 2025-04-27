@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
 import '../screens/manual_reading_weight.dart';
+import '../screens/insight_screen.dart';
+import '../widgets/bottom_nav_bar.dart'; // Adjust path
+import 'reports_screen.dart';
+import 'settings_screen.dart';
 
 class WeightScreen extends StatefulWidget {
   const WeightScreen({super.key});
@@ -24,13 +29,18 @@ class _WeightScreenState extends State<WeightScreen> {
 
   // Monthly weight data
   List<Map<String, dynamic>> _monthlyWeights = [];
-  
+
   // Loading state
   bool _isLoading = true;
-  
-  // FireStore instance
+
+  // Firestore instance
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // Firebase Auth instance
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // Navigation index
+  int _selectedNavIndex = 1; // Default to Reports
 
   @override
   void initState() {
@@ -43,11 +53,14 @@ class _WeightScreenState extends State<WeightScreen> {
     setState(() {
       _isLoading = true;
     });
-    
+
     try {
-      // Get current user ID (you'll need to implement user authentication)
-      String userId = 'current_user_id';
-      
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+      String userId = currentUser.uid;
+
       // Get the latest weight entry
       var latestWeightDoc = await _firestore
           .collection('user')
@@ -56,7 +69,7 @@ class _WeightScreenState extends State<WeightScreen> {
           .orderBy('date', descending: true)
           .limit(1)
           .get();
-      
+
       if (latestWeightDoc.docs.isNotEmpty) {
         var data = latestWeightDoc.docs.first.data();
         setState(() {
@@ -69,17 +82,17 @@ class _WeightScreenState extends State<WeightScreen> {
           };
         });
       }
-      
+
       // Get last 30 days of weight entries
       var monthlyData = await _firestore
           .collection('user')
           .doc(userId)
           .collection('weight')
           .orderBy('date')
-          .where('date', 
-                isGreaterThan: DateTime.now().subtract(const Duration(days: 30)))
+          .where('date',
+              isGreaterThan: DateTime.now().subtract(const Duration(days: 30)))
           .get();
-      
+
       List<Map<String, dynamic>> weights = [];
       for (var doc in monthlyData.docs) {
         var data = doc.data();
@@ -89,15 +102,13 @@ class _WeightScreenState extends State<WeightScreen> {
           'id': doc.id,
         });
       }
-      
+
       setState(() {
         _monthlyWeights = weights;
         _isLoading = false;
       });
     } catch (e) {
       print('Error fetching weight data: $e');
-      
-      // If error, use mock data for development
       setState(() {
         _currentWeight = {
           'weight': 75.5,
@@ -106,8 +117,6 @@ class _WeightScreenState extends State<WeightScreen> {
           'unit': 'kg',
           'date': DateTime.now(),
         };
-        
-        // Generate mock data for the past 30 days
         _monthlyWeights = List.generate(30, (index) {
           return {
             'weight': 75.5 - (index * 0.1),
@@ -115,25 +124,84 @@ class _WeightScreenState extends State<WeightScreen> {
             'id': 'mock_$index',
           };
         });
-        
         _isLoading = false;
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(e.toString().contains('User not logged in')
+                ? 'Please log in to view your weight data'
+                : 'Error loading data: $e')),
+      );
     }
-
-
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[100],
-      body: _isLoading 
+      appBar: AppBar(
+        backgroundColor: Colors.indigo,
+        elevation: 0,
+        title: const Text(
+          'Weight Tracking',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            onPressed: () {
+              _fetchWeightData();
+                        })
+        ],
+      ),
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
           : _buildWeightContent(),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.indigo,
         onPressed: () => _navigateToAddWeightScreen(),
         child: const Icon(Icons.add, color: Colors.white),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      bottomNavigationBar: BottomNavBar(
+        selectedIndex: _selectedNavIndex,
+        onItemTapped: (index) {
+          if (index == _selectedNavIndex) {
+            return; // Already on Dashboard screen
+          }
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          switch (index) {
+            case 0: // Home
+              // Stay on this screen
+              break;
+            case 1: // Reports
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const ReportsScreen()),
+              );
+              break;
+            case 2: // Insights
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const InsightsScreen()),
+              );
+              break;
+            case 3: // Settings
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+              break;
+          }
+        },
       ),
     );
   }
@@ -228,12 +296,11 @@ class _WeightScreenState extends State<WeightScreen> {
   }
 
   Widget _buildWeightChangeIndicator() {
-    // Calculate weight change
     double latestWeight = _monthlyWeights.last['weight'];
     double previousWeight = _monthlyWeights[_monthlyWeights.length - 2]['weight'];
     double change = latestWeight - previousWeight;
     bool isPositive = change > 0;
-    
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -325,10 +392,12 @@ class _WeightScreenState extends State<WeightScreen> {
                               showTitles: true,
                               reservedSize: 30,
                               getTitlesWidget: (value, meta) {
-                                if (value.toInt() % 5 == 0 && 
-                                    value.toInt() < _monthlyWeights.length && 
+                                if (value.toInt() % 5 == 0 &&
+                                    value.toInt() < _monthlyWeights.length &&
                                     value.toInt() >= 0) {
-                                  final date = _monthlyWeights[value.toInt()]['date'] as DateTime;
+                                  final date =
+                                      _monthlyWeights[value.toInt()]['date']
+                                          as DateTime;
                                   return Padding(
                                     padding: const EdgeInsets.only(top: 8.0),
                                     child: Text(
@@ -385,7 +454,6 @@ class _WeightScreenState extends State<WeightScreen> {
                               color: Colors.indigo.withOpacity(0.2),
                             ),
                           ),
-                          // Goal line
                           LineChartBarData(
                             spots: List.generate(_monthlyWeights.length, (index) {
                               return FlSpot(
@@ -423,27 +491,19 @@ class _WeightScreenState extends State<WeightScreen> {
 
   double _calculateMinY() {
     if (_monthlyWeights.isEmpty) return 50.0;
-    
     double minWeight = _monthlyWeights
         .map((entry) => entry['weight'] as double)
         .reduce((min, weight) => weight < min ? weight : min);
-    
     double goal = _currentWeight['goal'];
-    
-    // Return the lower of the two, minus a padding of 5
     return (minWeight < goal ? minWeight : goal) - 5;
   }
 
   double _calculateMaxY() {
     if (_monthlyWeights.isEmpty) return 100.0;
-    
     double maxWeight = _monthlyWeights
         .map((entry) => entry['weight'] as double)
         .reduce((max, weight) => weight > max ? weight : max);
-    
     double goal = _currentWeight['goal'];
-    
-    // Return the higher of the two, plus a padding of 5
     return (maxWeight > goal ? maxWeight : goal) + 5;
   }
 
@@ -473,8 +533,6 @@ class _WeightScreenState extends State<WeightScreen> {
   Widget _buildBMICard() {
     String bmiCategory;
     Color bmiColor;
-    
-    // BMI Categories
     if (_currentWeight['bmi'] < 18.5) {
       bmiCategory = 'Underweight';
       bmiColor = Colors.blue;
@@ -488,7 +546,7 @@ class _WeightScreenState extends State<WeightScreen> {
       bmiCategory = 'Obese';
       bmiColor = Colors.red;
     }
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -539,7 +597,8 @@ class _WeightScreenState extends State<WeightScreen> {
                     ),
                     const SizedBox(height: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: bmiColor,
                         borderRadius: BorderRadius.circular(20),
@@ -621,9 +680,10 @@ class _WeightScreenState extends State<WeightScreen> {
   }
 
   Widget _buildGoalProgressCard() {
-    final double progressPercentage = (_currentWeight['goal'] / _currentWeight['weight']).clamp(0.0, 1.0);
+    final double progressPercentage =
+        (_currentWeight['goal'] / _currentWeight['weight']).clamp(0.0, 1.0);
     final bool isReached = _currentWeight['weight'] <= _currentWeight['goal'];
-    
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -648,7 +708,6 @@ class _WeightScreenState extends State<WeightScreen> {
                 ),
                 TextButton.icon(
                   onPressed: () {
-                    // Show dialog to edit goal
                     _showEditGoalDialog();
                   },
                   icon: const Icon(Icons.edit, size: 16),
@@ -720,7 +779,7 @@ class _WeightScreenState extends State<WeightScreen> {
     final TextEditingController goalController = TextEditingController(
       text: _currentWeight['goal'].toString(),
     );
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -740,14 +799,11 @@ class _WeightScreenState extends State<WeightScreen> {
           ),
           FilledButton(
             onPressed: () {
-              // Update the goal
               setState(() {
-                _currentWeight['goal'] = double.tryParse(goalController.text) ?? _currentWeight['goal'];
+                _currentWeight['goal'] =
+                    double.tryParse(goalController.text) ?? _currentWeight['goal'];
               });
-              
-              // Update in Firebase
               _updateGoalInFirebase();
-              
               Navigator.pop(context);
             },
             style: FilledButton.styleFrom(
@@ -762,15 +818,16 @@ class _WeightScreenState extends State<WeightScreen> {
 
   Future<void> _updateGoalInFirebase() async {
     try {
-      String userId = 'current_user_id';
-      
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+
       await _firestore
           .collection('user')
-          .doc(userId)
+          .doc(currentUser.uid)
           .set({
             'weightGoal': _currentWeight['goal'],
           }, SetOptions(merge: true));
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Weight goal updated successfully')),
       );
@@ -805,9 +862,7 @@ class _WeightScreenState extends State<WeightScreen> {
                   ),
                 ),
                 TextButton.icon(
-                  onPressed: () {
-                    // View all entries
-                  },
+                  onPressed: () {},
                   icon: const Icon(Icons.list, size: 16),
                   label: const Text('View All'),
                   style: TextButton.styleFrom(
@@ -827,19 +882,19 @@ class _WeightScreenState extends State<WeightScreen> {
                 : ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _monthlyWeights.length > 5 ? 5 : _monthlyWeights.length,
+                    itemCount:
+                        _monthlyWeights.length > 5 ? 5 : _monthlyWeights.length,
                     itemBuilder: (context, index) {
-                      // Display in reverse order (most recent first)
                       final entryIndex = _monthlyWeights.length - 1 - index;
                       final entry = _monthlyWeights[entryIndex];
                       final entryDate = entry['date'] as DateTime;
-                      
-                      // Calculate weight change compared to previous entry
+
                       double? change;
                       if (entryIndex > 0) {
-                        change = entry['weight'] - _monthlyWeights[entryIndex - 1]['weight'];
+                        change = entry['weight'] -
+                            _monthlyWeights[entryIndex - 1]['weight'];
                       }
-                      
+
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(
@@ -860,14 +915,17 @@ class _WeightScreenState extends State<WeightScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    change > 0 ? Icons.arrow_upward : Icons.arrow_downward,
+                                    change > 0
+                                        ? Icons.arrow_upward
+                                        : Icons.arrow_downward,
                                     color: change > 0 ? Colors.red : Colors.green,
                                     size: 16,
                                   ),
                                   Text(
                                     '${change.abs().toStringAsFixed(1)} ${_currentWeight['unit']}',
                                     style: TextStyle(
-                                      color: change > 0 ? Colors.red : Colors.green,
+                                      color:
+                                          change > 0 ? Colors.red : Colors.green,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -875,7 +933,6 @@ class _WeightScreenState extends State<WeightScreen> {
                               )
                             : const Text('First Entry'),
                         onTap: () {
-                          // Show entry details or allow editing
                           _showEntryDetailsDialog(entry);
                         },
                       );
@@ -889,7 +946,7 @@ class _WeightScreenState extends State<WeightScreen> {
 
   void _showEntryDetailsDialog(Map<String, dynamic> entry) {
     final DateTime entryDate = entry['date'] as DateTime;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -927,18 +984,18 @@ class _WeightScreenState extends State<WeightScreen> {
 
   Future<void> _deleteWeightEntry(String entryId) async {
     try {
-      String userId = 'current_user_id';
-      
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) return;
+
       await _firestore
-          .collection('users')
-          .doc(userId)
-          .collection('weights')
+          .collection('user') // Fixed from 'users' to 'user'
+          .doc(currentUser.uid)
+          .collection('weight')
           .doc(entryId)
           .delete();
-      
-      // Refresh data
+
       _fetchWeightData();
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Weight entry deleted successfully')),
       );
@@ -949,6 +1006,7 @@ class _WeightScreenState extends State<WeightScreen> {
     }
   }
 
+ 
   void _navigateToAddWeightScreen() async {
     final result = await Navigator.push(
       context,
@@ -956,15 +1014,13 @@ class _WeightScreenState extends State<WeightScreen> {
         builder: (context) => const ManualWeightScreen(),
       ),
     );
-    
-    if (result == true) {
-      // Refresh data when returning from manual weight screen
+
+    if (result == true && mounted) {
       _fetchWeightData();
     }
   }
 }
 
-// Custom painter for BMI gauge
 class BMIGaugePainter extends CustomPainter {
   final double bmi;
 
@@ -974,13 +1030,12 @@ class BMIGaugePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
-    
-    // Draw gauge background
+
     final paintBackground = Paint()
       ..color = Colors.grey[200]!
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10;
-    
+
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 5),
       -3 * pi / 4,
@@ -988,12 +1043,10 @@ class BMIGaugePainter extends CustomPainter {
       false,
       paintBackground,
     );
-    
-    // Calculate BMI progress on gauge (0-40 BMI scale)
+
     final bmiProgress = (bmi / 40).clamp(0.0, 1.0);
     final sweepAngle = bmiProgress * 6 * pi / 4;
-    
-    // Determine color based on BMI value
+
     Color gaugeColor;
     if (bmi < 18.5) {
       gaugeColor = Colors.blue;
@@ -1004,14 +1057,13 @@ class BMIGaugePainter extends CustomPainter {
     } else {
       gaugeColor = Colors.red;
     }
-    
-    // Draw gauge progress
+
     final paintProgress = Paint()
       ..color = gaugeColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10
       ..strokeCap = StrokeCap.round;
-    
+
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 5),
       -3 * pi / 4,
@@ -1019,8 +1071,7 @@ class BMIGaugePainter extends CustomPainter {
       false,
       paintProgress,
     );
-    
-    // Draw BMI needle
+
     final needleLength = radius - 20;
     final needleAngle = -3 * pi / 4 + sweepAngle;
     final needleStart = center;
@@ -1028,25 +1079,21 @@ class BMIGaugePainter extends CustomPainter {
       center.dx + needleLength * cos(needleAngle),
       center.dy + needleLength * sin(needleAngle),
     );
-    
+
     final paintNeedle = Paint()
       ..color = Colors.grey[800]!
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
-    
+
     canvas.drawLine(needleStart, needleEnd, paintNeedle);
-    
-    // Draw needle center point
+
     final paintCenter = Paint()
       ..color = Colors.grey[800]!
       ..style = PaintingStyle.fill;
-    
+
     canvas.drawCircle(center, 5, paintCenter);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
-  }
-
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
