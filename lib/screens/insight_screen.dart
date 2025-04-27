@@ -6,6 +6,9 @@ import 'package:table_calendar/table_calendar.dart';
 
 // Import dashboard screen
 import '../screens/dashboard.dart';
+import '../widgets/bottom_nav_bar.dart'; // Adjust path
+import 'reports_screen.dart';
+import 'settings_screen.dart';
 
 class InsightsScreen extends StatefulWidget {
   const InsightsScreen({super.key});
@@ -23,10 +26,8 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
   DateTime _selectedDate = DateTime.now();
   CalendarFormat _calendarFormat = CalendarFormat.week;
   DateTime _focusedDay = DateTime.now();
-  late TabController _tabController;
   
   // Selected category and navigation
-  String _selectedCategory = 'Blood Pressure';
   int _selectedNavIndex = 0; // Keep only this declaration
   
   // Insight data
@@ -307,7 +308,36 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               ],
             ),
           ),
-      bottomNavigationBar: _buildBottomNavBar(),
+      bottomNavigationBar: BottomNavBar(
+        selectedIndex: _selectedNavIndex,
+        onItemTapped: (index) {
+          if (index == _selectedNavIndex) {
+            return; // Already on Dashboard screen
+          }
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          switch (index) {
+            case 0: // Home
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const DashboardScreen()),
+              );
+              break;
+            case 1: // Reports
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const ReportsScreen()),
+              );
+              break;
+            case 2: // Insights
+              break;
+            case 3: // Settings
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+              break;
+          }
+        },
+      ),
     ); // Added missing closing bracket here
   }
   
@@ -547,65 +577,4 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
     );
   }
   
-  Widget _buildBottomNavBar() {
-    return BottomNavigationBar(
-      currentIndex: _selectedNavIndex,
-      selectedItemColor: Colors.indigo,
-      unselectedItemColor: Colors.grey,
-      showUnselectedLabels: true,
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.insert_chart),
-          label: 'Reports',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.lightbulb_outline),
-          label: 'Insights',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.settings),
-          label: 'Settings',
-        ),
-      ],
-      onTap: (index) {
-        if (index == _selectedNavIndex && index == 2) {
-          // Already on insights screen, no need to navigate
-          return;
-        }
-        
-        setState(() {
-          _selectedNavIndex = index;
-        });
-        
-        // Navigate to appropriate screen based on index
-        switch (index) {
-          case 0: // Home
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const DashboardScreen()),
-            );
-            break;
-          case 1: // Reports
-            // You can implement navigation to Reports screen here
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Navigating to Reports')),
-            );
-            break;
-          case 2: // Insights - already on this screen
-            // Do nothing since we're already on the Insights screen
-            break;
-          case 3: // Settings
-            // You can implement navigation to Settings screen here
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Navigating to Settings')),
-            );
-            break;
-        }
-      },
-    );
-  }
 }

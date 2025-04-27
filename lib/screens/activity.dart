@@ -4,8 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'overview.dart';
-import '../screens/dashboard.dart'; // Import DashboardScreen
+// Import DashboardScreen
 import '../screens/insight_screen.dart';
+import '../widgets/bottom_nav_bar.dart'; // Adjust path
+import 'reports_screen.dart';
+import 'settings_screen.dart';
 
 class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
@@ -15,7 +18,7 @@ class ActivityScreen extends StatefulWidget {
 }
 
 class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStateMixin {
-  int _selectedIndex = 0;
+  int _selectedNavIndex = 0;
   String _selectedCategory = 'Activity';
   bool _isNavigating = false;
   bool _isLoading = true;
@@ -333,7 +336,37 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
         onPressed: () => _addManualActivity(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
-      bottomNavigationBar: _buildBottomNavBar(),
+      bottomNavigationBar: BottomNavBar(
+        selectedIndex: _selectedNavIndex,
+        onItemTapped: (index) {
+          if (index == _selectedNavIndex) {
+            return; // Already on Dashboard screen
+          }
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          switch (index) {
+            case 0: // Home
+              // Stay on this screen
+              break;
+            case 1: // Reports
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const ReportsScreen()),
+              );
+              break;
+            case 2: // Insights
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const InsightsScreen()),
+              );
+              break;
+            case 3: // Settings
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+              break;
+          }
+        },
+      ),
     );
   }
 
@@ -1145,62 +1178,5 @@ class _ActivityScreenState extends State<ActivityScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildBottomNavBar() {
-    return BottomNavigationBar(
-      currentIndex: _selectedIndex,
-      selectedItemColor: Colors.indigo,
-      unselectedItemColor: Colors.grey,
-      showUnselectedLabels: true,
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.insert_chart),
-          label: 'Reports',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.settings),
-          label: 'Settings',
-        ),
-      ],
-      onTap: (index) {
-        setState(() {
-          _selectedIndex = index;
-        });
-
-        // Navigate to appropriate screen based on index
-        switch (index) {
-          case 0: // Home
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const DashboardScreen()),
-            );
-            break;
-          case 1: // Reports
-            // You can implement navigation to Reports screen here
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Navigating to Reports')),
-            );
-            break;
-          case 2: // Insights - already on this screen
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const InsightsScreen()),
-            );
-            break;
-          case 3: // Settings
-            // You can implement navigation to Settings screen here
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Navigating to Settings')),
-            );
-            break;
-        }
-      },
-    );
-  }
+  
 }

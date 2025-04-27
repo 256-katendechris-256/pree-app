@@ -3,6 +3,10 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../widgets/bottom_nav_bar.dart'; // Adjust path
+import 'reports_screen.dart';
+import 'insight_screen.dart';
+import 'settings_screen.dart';
 
 class HealthOverviewScreen extends StatefulWidget {
   const HealthOverviewScreen({super.key});
@@ -12,7 +16,7 @@ class HealthOverviewScreen extends StatefulWidget {
 }
 
 class _HealthOverviewScreenState extends State<HealthOverviewScreen> with TickerProviderStateMixin {
-  int _selectedIndex = 0;
+  int _selectedNavIndex = 0;
   late TabController _tabController;
   bool _isLoading = true;
   
@@ -341,7 +345,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
       // Process vitals - with safe parsing
       for (var doc in vitalSignsSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final timestamp = data['timestamp'] as Timestamp?;
         final systolic = _parseIntFromDynamic(data['systolic_BP']);
 
@@ -356,7 +360,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
       // Process activity - with safe parsing
       for (var doc in activitySnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final timestamp = data['timestamp'] as Timestamp?;
         final steps = _parseIntFromDynamic(data['steps']);
 
@@ -371,7 +375,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
       // Process weight - with safe parsing
       for (var doc in weightSnapshot.docs) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         final timestamp = data['timestamp'] as Timestamp?;
         final current = _parseDoubleFromDynamic(data['current']);
 
@@ -465,7 +469,37 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
               ),
             ],
           ),
-      bottomNavigationBar: _buildBottomNavBar(),
+      bottomNavigationBar: BottomNavBar(
+        selectedIndex: _selectedNavIndex,
+        onItemTapped: (index) {
+          if (index == _selectedNavIndex) {
+            return; // Already on Dashboard screen
+          }
+          setState(() {
+            _selectedNavIndex = index;
+          });
+          switch (index) {
+            case 0: // Home
+              // Stay on this screen
+              break;
+            case 1: // Reports
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const ReportsScreen()),
+              );
+              break;
+            case 2: // Insights
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const InsightsScreen()),
+              );
+              break;
+            case 3: // Settings
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+              break;
+          }
+        },
+      ),
     );
   }
 
@@ -1473,36 +1507,5 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
     );
   }
 
-  Widget _buildBottomNavBar() {
-    return BottomNavigationBar(
-      currentIndex: _selectedIndex,
-      selectedItemColor: Colors.indigo,
-      unselectedItemColor: Colors.grey,
-      showUnselectedLabels: true,
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.insert_chart),
-          label: 'Reports',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.calendar_today),
-          label: 'Calendar',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.settings),
-          label: 'Settings',
-        ),
-      ],
-      onTap: (index) {
-        setState(() {
-          _selectedIndex = index;
-        });
-      },
-    );
-  }
+  
 }
