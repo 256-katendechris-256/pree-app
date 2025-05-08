@@ -64,7 +64,7 @@ flutter:
   # Uncomment and configure assets when needed
   assets:
     - assets/images/
-    - assets/icons/
+#    - assets/icons/
 
   # Uncomment and configure fonts when needed
   # fonts:

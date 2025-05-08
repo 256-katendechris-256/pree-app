@@ -523,7 +523,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const WeightEntryScreen()),
+          MaterialPageRoute(builder: (context) => const WeightScreen()),
         ).then((_) {
           setState(() {
             _selectedCategory = 'Blood Pressure';
