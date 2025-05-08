@@ -54,35 +54,8 @@ jobs:
           sudo apt-get install -y nodejs
           sudo npm install -g firebase-tools
           
-          # Check Firebase CLI version
-          firebase --version
-          
           # Create credentials file
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
-          
-          # Validate service account
-          if jq -e . >/dev/null 2>&1 <<<"$(cat service-account.json)"; then
-            PROJECT_ID=$(jq -r '.project_id' service-account.json)
-            echo "✅ Service account is valid JSON"
-            echo "Project ID: $PROJECT_ID"
-          else
-            echo "❌ Service account is not valid JSON"
-            exit 1
-          fi
-          
-          # Validate App ID
-          APP_ID="${{ secrets.FIREBASE_APP_ID }}"
-          if [ -z "$APP_ID" ]; then
-            echo "❌ App ID is empty!"
-            exit 1
-          fi
-          
-          # Mask App ID for logs
-          APP_ID_LENGTH=${#APP_ID}
-          FIRST_FIVE=${APP_ID:0:5}
-          LAST_FIVE=${APP_ID: -5}
-          MASKED=$(printf '%*s' $((APP_ID_LENGTH - 10)) | tr ' ' '*')
-          echo "📱 App ID: $FIRST_FIVE$MASKED$LAST_FIVE (length: $APP_ID_LENGTH)"
           
           # Verify APK exists
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
@@ -91,61 +64,64 @@ jobs:
             echo "✅ APK exists at $APK_PATH (size: $APK_SIZE)"
           else
             echo "❌ APK not found at $APK_PATH"
-            echo "Available APKs:"
-            find . -name "*.apk" | sort
             exit 1
           fi
 
-      - name: Distribute to Firebase App Distribution
+      - name: Distribute to Firebase App Distribution - Simple Approach
         if: github.ref == 'refs/heads/main'
         run: |
           # Set environment variables
           export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
           
-          # Try distribution with service account authentication
-          echo "📦 Distributing APK..."
-          firebase --token "$(cat service-account.json | jq -r '.private_key')" appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+          # Try the simplest approach
+          firebase appdistribution:distribute "build/app/outputs/flutter-apk/app-release.apk" \
             --app "${{ secrets.FIREBASE_APP_ID }}" \
             --groups "testers" \
-            --release-notes "Version ${{ github.run_number }} from GitHub Actions" \
-            --debug
-          
-          # If that fails, try another approach
-          if [ $? -ne 0 ]; then
-            echo "First attempt failed, trying alternative approach..."
-          
-            # Try using the service account directly
-            firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
-              --app "${{ secrets.FIREBASE_APP_ID }}" \
-              --groups "testers" \
-              --release-notes "Version ${{ github.run_number }}" \
-              --service-account-file="$(pwd)/service-account.json"
-          fi
+            --release-notes "Version ${{ github.run_number }}" \
+            --service-account-file="$(pwd)/service-account.json"
 
-      - name: Fallback to direct API if Firebase CLI fails
+      # Add a fallback distribution method using a simple HTTP server
+      - name: Fallback - Create APK download page
         if: github.ref == 'refs/heads/main' && failure()
         run: |
-          echo "Using Firebase App Distribution REST API directly..."
+          echo "Creating a simple download page for the APK"
+          mkdir -p public
           
-          # Get access token using service account
-          ACCESS_TOKEN=$(curl -s -X POST https://www.googleapis.com/oauth2/v4/token \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"grant_type\": \"urn:ietf:params:oauth:grant-type:jwt-bearer\",
-              \"assertion\": \"$(jq -r '.private_key' service-account.json | sed 's/\\n/\\\\n/g')\"
-            }" | jq -r '.access_token')
+          # Create a simple HTML download page
+          cat > public/index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>App Download</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+              .button { background-color: #4CAF50; color: white; padding: 15px 25px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 10px; }
+            </style>
+          </head>
+          <body>
+            <h1>Download Your App</h1>
+            <p>Version ${{ github.run_number }} - Built on $(date)</p>
+            <p>Commit: ${{ github.sha }}</p>
+            <p><a class="button" href="app-release.apk">Download APK</a></p>
+            <p><small>Note: You may need to enable installation from unknown sources in your device settings.</small></p>
+          </body>
+          </html>
+          EOF
           
-          if [ -z "$ACCESS_TOKEN" ]; then
-            echo "Failed to get access token"
-            exit 1
-          fi
+          # Copy the APK to the public directory
+          cp build/app/outputs/flutter-apk/app-release.apk public/
           
-          # Use Firebase App Distribution API directly
-          curl -v -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
-            -F "app=${{ secrets.FIREBASE_APP_ID }}" \
-            -F "release_notes=Version ${{ github.run_number }}" \
-            -H "Authorization: Bearer $ACCESS_TOKEN" \
-            https://firebaseappdistribution.googleapis.com/upload/v1/projects/$(jq -r '.project_id' service-account.json)/apps/${{ secrets.FIREBASE_APP_ID }}/releases:upload
+          # Upload the artifacts
+          mkdir -p fallback-distribution
+          cp -r public/* fallback-distribution/
+
+      - name: Upload fallback distribution as artifact
+        if: github.ref == 'refs/heads/main' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-download-page
+          path: fallback-distribution
 
       - name: Cleanup
         if: always()
