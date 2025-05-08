@@ -20,6 +20,15 @@ jobs:
           flutter-version: '3.29.x'
           channel: 'stable'
 
+      - name: Inspect repository structure
+        run: |
+          echo "Repository structure:"
+          find . -type d -not -path "*/\.*" | sort
+          echo "Looking for Gradle files:"
+          find . -name "*.gradle" -o -name "*.gradle.kts" | sort
+          echo "Looking for Android directory:"
+          find . -path "*/android" -type d | sort
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -78,18 +87,49 @@ jobs:
 
       - name: Setup keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
+          # Try to detect Android app directory
+          ANDROID_DIR=$(find . -path "*/android" -type d | head -n 1)
+          ANDROID_APP_DIR=$(find . -path "*/android/app" -type d | head -n 1)
+          
+          if [ -z "$ANDROID_APP_DIR" ]; then
+            echo "Could not find Android app directory. Creating one."
+            mkdir -p android/app
+            ANDROID_APP_DIR="android/app"
+          fi
+          
+          echo "Using Android app directory: $ANDROID_APP_DIR"
+          
+          # Save keystore to detected location
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$ANDROID_APP_DIR/keystore.jks"
           
           # Create key.properties file
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
-          echo "storeFile=keystore.jks" >> android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > "$ANDROID_DIR/key.properties"
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> "$ANDROID_DIR/key.properties"
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> "$ANDROID_DIR/key.properties"
+          echo "storeFile=keystore.jks" >> "$ANDROID_DIR/key.properties"
 
       - name: Configure Gradle for signing
         run: |
-          # Create a modified build.gradle with signing config
-          BUILD_GRADLE="android/app/build.gradle"
+          # Try to find the build.gradle file
+          BUILD_GRADLE=$(find . -name "build.gradle" -path "*/android/app/*" | head -n 1)
+          
+          if [ -z "$BUILD_GRADLE" ]; then
+            echo "Could not find android/app/build.gradle"
+            echo "Looking for any build.gradle files:"
+            find . -name "build.gradle" | sort
+            echo "Looking for any build.gradle.kts files:"
+            find . -name "build.gradle.kts" | sort
+          
+            # Try to find alternative build.gradle path
+            BUILD_GRADLE=$(find . -name "build.gradle" | head -n 1)
+          
+            if [ -z "$BUILD_GRADLE" ]; then
+              echo "No build.gradle files found. Skipping Gradle configuration."
+              exit 0
+            fi
+          fi
+          
+          echo "Using build.gradle at: $BUILD_GRADLE"
           
           # Check if key.properties configuration already exists
           if grep -q "def keystoreProperties" "$BUILD_GRADLE"; then
@@ -154,7 +194,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload to Firebase App Distribution
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' && success()
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
