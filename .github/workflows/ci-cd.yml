@@ -49,10 +49,11 @@ jobs:
       - name: Setup for Firebase Distribution
         if: github.ref == 'refs/heads/main'
         run: |
-          # Install Node.js and Firebase Tools
-          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-          sudo apt-get install -y nodejs
-          sudo npm install -g firebase-tools
+          # Install Firebase CLI
+          npm install -g firebase-tools@latest
+          
+          # Show Firebase CLI version
+          firebase --version
           
           # Create credentials file
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
@@ -67,61 +68,37 @@ jobs:
             exit 1
           fi
 
-      - name: Distribute to Firebase App Distribution - Simple Approach
+      - name: Distribute to Firebase App Distribution
         if: github.ref == 'refs/heads/main'
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/service-account.json
         run: |
-          # Set environment variables
-          export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
-          
-          # Try the simplest approach
+          # Try with environment variable authentication
           firebase appdistribution:distribute "build/app/outputs/flutter-apk/app-release.apk" \
             --app "${{ secrets.FIREBASE_APP_ID }}" \
             --groups "testers" \
-            --release-notes "Version ${{ github.run_number }}" \
-            --service-account-file="$(pwd)/service-account.json"
+            --release-notes "Version ${{ github.run_number }}"
 
-      # Add a fallback distribution method using a simple HTTP server
-      - name: Fallback - Create APK download page
-        if: github.ref == 'refs/heads/main' && failure()
-        run: |
-          echo "Creating a simple download page for the APK"
-          mkdir -p public
-          
-          # Create a simple HTML download page
-          cat > public/index.html << EOF
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>App Download</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-              body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-              .button { background-color: #4CAF50; color: white; padding: 15px 25px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px; margin: 4px 2px; cursor: pointer; border-radius: 10px; }
-            </style>
-          </head>
-          <body>
-            <h1>Download Your App</h1>
-            <p>Version ${{ github.run_number }} - Built on $(date)</p>
-            <p>Commit: ${{ github.sha }}</p>
-            <p><a class="button" href="app-release.apk">Download APK</a></p>
-            <p><small>Note: You may need to enable installation from unknown sources in your device settings.</small></p>
-          </body>
-          </html>
-          EOF
-          
-          # Copy the APK to the public directory
-          cp build/app/outputs/flutter-apk/app-release.apk public/
-          
-          # Upload the artifacts
-          mkdir -p fallback-distribution
-          cp -r public/* fallback-distribution/
-
-      - name: Upload fallback distribution as artifact
-        if: github.ref == 'refs/heads/main' && failure()
-        uses: actions/upload-artifact@v4
+      # Create a GitHub Release as a fallback
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' && (success() || failure())
+        uses: softprops/action-gh-release@v1
         with:
-          name: app-download-page
-          path: fallback-distribution
+          files: build/app/outputs/flutter-apk/app-release.apk
+          name: Release v${{ github.run_number }}
+          tag_name: v${{ github.run_number }}
+          body: |
+            ## Release v${{ github.run_number }}
+            
+            Built from commit: ${{ github.sha }}
+            
+            ### How to install
+            
+            1. Download the APK file
+            2. On your Android device, enable "Install from unknown sources" in settings
+            3. Install the downloaded APK
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cleanup
         if: always()
