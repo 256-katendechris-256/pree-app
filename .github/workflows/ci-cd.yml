@@ -2,7 +2,7 @@ name: Flutter CI/CD with Firebase
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, Katende ]
   pull_request:
     branches: [ main ]
 
