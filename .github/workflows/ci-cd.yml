@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -19,19 +19,19 @@ jobs:
         with:
           flutter-version: '3.29.x'
           channel: 'stable'
-      
+
       - name: Install dependencies
         run: flutter pub get
-      
+
       - name: Run tests
         run: flutter test
-      
+
       - name: Set build number
         run: |
           VERSION_NAME=$(grep 'version:' pubspec.yaml | awk '{print $2}' | cut -d '+' -f1)
           sed -i "s/version: $VERSION_NAME+[0-9]*/version: $VERSION_NAME+${{ github.run_number }}/" pubspec.yaml
           cat pubspec.yaml
-      
+
       - name: Setup keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/keystore.jks
@@ -41,51 +41,104 @@ jobs:
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
           echo "storeFile=keystore.jks" >> android/key.properties
-      
+
       - name: Configure Gradle for signing
         run: |
-          # Check if the file exists
-          if [ ! -f "android/app/build.gradle" ]; then
-            echo "android/app/build.gradle does not exist"
-            exit 1
+          # Create a modified build.gradle with signing config
+          BUILD_GRADLE="android/app/build.gradle"
+          
+          # Check if key.properties configuration already exists
+          if grep -q "def keystoreProperties" "$BUILD_GRADLE"; then
+            echo "Keystore configuration already exists, skipping modification"
+          else
+            # For Kotlin DSL (build.gradle.kts)
+            if [[ "$BUILD_GRADLE" == *".kts" ]]; then
+              # Make backup
+              cp "$BUILD_GRADLE" "${BUILD_GRADLE}.bak"
+          
+              # Add signing config for Kotlin DSL
+              sed -i '/android {/a \
+                signingConfigs {\
+                  create("release") {\
+                    val keystoreProperties = java.util.Properties()\
+                    val keystorePropertiesFile = rootProject.file("key.properties")\
+                    if (keystorePropertiesFile.exists()) {\
+                      keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))\
+                    }\
+                    keyAlias = keystoreProperties["keyAlias"] as String\
+                    keyPassword = keystoreProperties["keyPassword"] as String\
+                    storeFile = file(keystoreProperties["storeFile"] as String)\
+                    storePassword = keystoreProperties["storePassword"] as String\
+                  }\
+                }' "$BUILD_GRADLE"
+          
+              # Add signing config to release buildType
+              sed -i '/buildTypes {/,/}/s/release {/release {\n            signingConfig = signingConfigs.getByName("release")/' "$BUILD_GRADLE"
+          
+            else
+              # For Groovy DSL (build.gradle)
+              # Create a temporary file
+              TEMP_FILE=$(mktemp)
+          
+              # Add key.properties loading at the top
+              echo '
+              def keystoreProperties = new Properties()
+              def keystorePropertiesFile = rootProject.file("key.properties")
+              if (keystorePropertiesFile.exists()) {
+                  keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+              }
+              ' > "$TEMP_FILE"
+          
+              # Append original gradle file
+              cat "$BUILD_GRADLE" >> "$TEMP_FILE"
+          
+              # Replace signingConfigs section if it exists
+              if grep -q "signingConfigs" "$TEMP_FILE"; then
+                sed -i '/signingConfigs/,/}/c\
+                signingConfigs {\
+                    release {\
+                        keyAlias keystoreProperties["keyAlias"]\
+                        keyPassword keystoreProperties["keyPassword"]\
+                        storeFile file(keystoreProperties["storeFile"])\
+                        storePassword keystoreProperties["storePassword"]\
+                    }\
+                }' "$TEMP_FILE"
+              else
+                # Add signingConfigs section inside android block
+                sed -i '/android {/a \
+                    signingConfigs {\
+                        release {\
+                            keyAlias keystoreProperties["keyAlias"]\
+                            keyPassword keystoreProperties["keyPassword"]\
+                            storeFile file(keystoreProperties["storeFile"])\
+                            storePassword keystoreProperties["storePassword"]\
+                        }\
+                    }' "$TEMP_FILE"
+              fi
+          
+              # Modify release buildType to use signing config
+              sed -i '/buildTypes {/,/}/s/release {/release {\n            signingConfig signingConfigs.release/' "$TEMP_FILE"
+          
+              # Replace original with modified file
+              mv "$TEMP_FILE" "$BUILD_GRADLE"
+            fi
+          
+            echo "Added signing configuration to build.gradle"
           fi
           
-          # Add signing configuration
-          cat <<EOF >> android/app/build.gradle
-          
-          // Add the following lines if they don't exist
-          def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-          
-          android {
-              signingConfigs {
-                  release {
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
-                      storeFile file(keystoreProperties['storeFile'])
-                      storePassword keystoreProperties['storePassword']
-                  }
-              }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.release
-                  }
-              }
-          }
-          EOF
-      
+          # Display the modified build.gradle for debugging
+          echo "=== Modified build.gradle ==="
+          cat "$BUILD_GRADLE"
+
       - name: Build signed APK
         run: flutter build apk --release
-      
+
       - name: Upload APK as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-      
+
       - name: Upload to Firebase App Distribution
         if: github.ref == 'refs/heads/main'
         uses: wzieba/Firebase-Distribution-Github-Action@v1
