@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "439220866294",
+    "project_id": "finale-813d8",
+    "storage_bucket": "finale-813d8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:439220866294:android:7bc08aa97242f1f4ccb0d7",
+        "android_client_info": {
+          "package_name": "com.example.finale"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBHOMeChWTwEpN3v3Zzh5DmArsGtNtVzE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
