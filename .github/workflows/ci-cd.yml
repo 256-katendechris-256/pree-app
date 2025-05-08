@@ -46,7 +46,7 @@ jobs:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Prepare for Firebase distribution
+      - name: Setup for Firebase Distribution
         if: github.ref == 'refs/heads/main'
         run: |
           # Install Node.js and Firebase Tools
@@ -102,40 +102,53 @@ jobs:
           # Set environment variables
           export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
           
-          # Log in to Firebase
-          echo "🔑 Logging in to Firebase..."
-          firebase login:ci --no-localhost
-          
-          # Try to get project info
-          echo "🔍 Getting project info..."
-          firebase projects:list
-          
-          # Try distribution
+          # Try distribution with service account authentication
           echo "📦 Distributing APK..."
-          firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+          firebase --token "$(cat service-account.json | jq -r '.private_key')" appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
             --app "${{ secrets.FIREBASE_APP_ID }}" \
             --groups "testers" \
             --release-notes "Version ${{ github.run_number }} from GitHub Actions" \
             --debug
           
-          # Log result
-          if [ $? -eq 0 ]; then
-            echo "✅ Distribution successful!"
-          else
-            echo "❌ Distribution failed!"
+          # If that fails, try another approach
+          if [ $? -ne 0 ]; then
+            echo "First attempt failed, trying alternative approach..."
           
-            # Try alternative distribution method
-            echo "🔄 Trying alternative method..."
-            curl -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
-                 -F "app=${{ secrets.FIREBASE_APP_ID }}" \
-                 -F "release_notes=Version ${{ github.run_number }} from GitHub Actions" \
-                 -H "Authorization: Bearer $(cat ~/.config/configstore/firebase-tools.json | jq -r '.tokens.refresh_token')" \
-                 https://firebaseappdistribution.googleapis.com/v1/projects/$(jq -r '.project_id' service-account.json)/apps/${{ secrets.FIREBASE_APP_ID }}/releases:upload
+            # Try using the service account directly
+            firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+              --app "${{ secrets.FIREBASE_APP_ID }}" \
+              --groups "testers" \
+              --release-notes "Version ${{ github.run_number }}" \
+              --service-account-file="$(pwd)/service-account.json"
           fi
+
+      - name: Fallback to direct API if Firebase CLI fails
+        if: github.ref == 'refs/heads/main' && failure()
+        run: |
+          echo "Using Firebase App Distribution REST API directly..."
+          
+          # Get access token using service account
+          ACCESS_TOKEN=$(curl -s -X POST https://www.googleapis.com/oauth2/v4/token \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"grant_type\": \"urn:ietf:params:oauth:grant-type:jwt-bearer\",
+              \"assertion\": \"$(jq -r '.private_key' service-account.json | sed 's/\\n/\\\\n/g')\"
+            }" | jq -r '.access_token')
+          
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access token"
+            exit 1
+          fi
+          
+          # Use Firebase App Distribution API directly
+          curl -v -F "file=@build/app/outputs/flutter-apk/app-release.apk" \
+            -F "app=${{ secrets.FIREBASE_APP_ID }}" \
+            -F "release_notes=Version ${{ github.run_number }}" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            https://firebaseappdistribution.googleapis.com/upload/v1/projects/$(jq -r '.project_id' service-account.json)/apps/${{ secrets.FIREBASE_APP_ID }}/releases:upload
 
       - name: Cleanup
         if: always()
         run: |
           # Remove credentials
           rm -f service-account.json
-          rm -f ~/.config/configstore/firebase-tools.json
