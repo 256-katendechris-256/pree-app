@@ -22,9 +22,15 @@ jobs:
       
       - name: Install dependencies
         run: flutter pub get
-      
+
       - name: Run tests
         run: flutter test
+
+      - name: Set build number
+        run: |
+          VERSION_NAME=$(grep 'version:' pubspec.yaml | awk '{print $2}' | cut -d '+' -f1)
+          sed -i "s/version: $VERSION_NAME+[0-9]*/version: $VERSION_NAME+${{ github.run_number }}/" pubspec.yaml
+          cat pubspec.yaml
       
       - name: Build APK
         run: flutter build apk --release
