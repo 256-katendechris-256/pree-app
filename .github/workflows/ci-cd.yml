@@ -46,62 +46,21 @@ jobs:
           name: release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Setup for Firebase Distribution
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # Install Firebase CLI
-          npm install -g firebase-tools@latest
-          
-          # Show Firebase CLI version
-          firebase --version
-          
-          # Create credentials file
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
-          
-          # Verify APK exists
-          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
-          if [ -f "$APK_PATH" ]; then
-            APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
-            echo "✅ APK exists at $APK_PATH (size: $APK_SIZE)"
-          else
-            echo "❌ APK not found at $APK_PATH"
-            exit 1
-          fi
-
-      - name: Distribute to Firebase App Distribution
+      - name: Upload to Firebase App Distribution (only upload, no group distribution)
         if: github.ref == 'refs/heads/main'
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/service-account.json
         run: |
-          # Try with environment variable authentication
+          # Create credentials file
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
+          
+          # Install Firebase CLI
+          npm install -g firebase-tools@latest
+          
+          # Upload APK to Firebase App Distribution (without groups parameter)
           firebase appdistribution:distribute "build/app/outputs/flutter-apk/app-release.apk" \
             --app "${{ secrets.FIREBASE_APP_ID }}" \
-            --groups "testers" \
-            --release-notes "Version ${{ github.run_number }}"
-
-      # Create a GitHub Release as a fallback
-      - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main' && (success() || failure())
-        uses: softprops/action-gh-release@v1
-        with:
-          files: build/app/outputs/flutter-apk/app-release.apk
-          name: Release v${{ github.run_number }}
-          tag_name: v${{ github.run_number }}
-          body: |
-            ## Release v${{ github.run_number }}
-            
-            Built from commit: ${{ github.sha }}
-            
-            ### How to install
-            
-            1. Download the APK file
-            2. On your Android device, enable "Install from unknown sources" in settings
-            3. Install the downloaded APK
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cleanup
-        if: always()
-        run: |
-          # Remove credentials
+            --release-notes "Version ${{ github.run_number }} from CI"
+          
+          # Clean up
           rm -f service-account.json
