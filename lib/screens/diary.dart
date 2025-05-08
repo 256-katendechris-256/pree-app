@@ -146,7 +146,7 @@ class _MyDiaryScreenState extends State<MyDiaryScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Do you have any symptoms today?',
+              'Do you have any symptom today?',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
