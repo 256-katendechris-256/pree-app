@@ -66,7 +66,7 @@ class _WeightScreenState extends State<WeightScreen> {
           .collection('user')
           .doc(userId)
           .collection('weight')
-          .orderBy('date', descending: true)
+          .orderBy('date', descending: false)
           .limit(1)
           .get();
 
