@@ -37,13 +37,24 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Setup keystore
+      - name: Set up keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release-key.jks
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
+          # Decode the base64 keystore from secrets
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release-key.jks
+          
+          # Verify the keystore was created correctly
+          ls -la android/app/release-key.jks
+          
+          # Create key.properties with the exact same values as local
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" > android/key.properties
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
-          echo "storeFile=release-key.jks" >> android/key.properties
+          echo "storeFile=../app/release-key.jks" >> android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          
+          # Print key.properties for debugging (without showing actual passwords)
+          echo "Contents of key.properties:"
+          grep -v "Password" android/key.properties
+          echo "Password fields exist: $(grep Password android/key.properties | wc -l)"
 
       - name: Build APK
         run: flutter build apk --release
