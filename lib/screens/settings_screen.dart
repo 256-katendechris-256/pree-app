@@ -113,6 +113,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     });
     
     try {
+      // Get current user
       User? currentUser = _auth.currentUser;
       if (currentUser == null) {
         // Handle not logged in state
@@ -124,12 +125,9 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         );
         return;
       }
-
-
-      }
       
       String userId = currentUser.uid;
-
+      
       // Store the user ID
       setState(() {
         _userData['user_id'] = userId;
@@ -195,8 +193,6 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
       });
       
     } catch (e) {
-      print('Error loading user data: $e');
-      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading data: $e')),
@@ -240,7 +236,6 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         const SnackBar(content: Text('Profile updated successfully')),
       );
     } catch (e) {
-      print('Error updating user profile: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating profile: $e')),
       );
@@ -295,7 +290,6 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         const SnackBar(content: Text('Next of kin information updated successfully')),
       );
     } catch (e) {
-      print('Error updating next of kin: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error updating next of kin: $e')),
       );
@@ -517,7 +511,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: Colors.indigo.withOpacity(0.1),
+                      color: Colors.indigo.withAlpha(25),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -1080,7 +1074,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.orange.withOpacity(0.1),
+                      color: Colors.orange.withAlpha(25),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.help_outline, color: Colors.orange),
@@ -1103,7 +1097,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.blue.withOpacity(0.1),
+                      color: Colors.blue.withAlpha(25),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.support_agent, color: Colors.blue),
@@ -1175,7 +1169,7 @@ Widget _buildPairedDeviceItem(String name, String status, IconData icon, Color c
       Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withAlpha(25),
           shape: BoxShape.circle,
         ),
         child: Icon(
@@ -1282,4 +1276,5 @@ Widget _buildPairedDeviceItem(String name, String status, IconData icon, Color c
       ),
     ],
   );
+}
 }
