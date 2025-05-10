@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 
 import '../screens/dashboard.dart';
 import '../screens/insight_screen.dart';
 import '../widgets/bottom_nav_bar.dart'; // Adjust path
 import 'reports_screen.dart';
-
-
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -38,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     'is_currently_pregnant': false,
     'has_had_hypertension': false,
     'pregnancy_count': 0,
+    'user_id': '', // Add this for storing user ID
   };
   
   // Next of kin data
@@ -64,12 +64,15 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
   // TabController for sections
   late TabController _tabController;
   
+  // For copy success message
+  bool _showCopySuccess = false;
+  
   @override
   void initState() {
     super.initState();
     
     // Initialize tab controller
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this); // Changed to 3 for the new Device tab
     
     // Initialize controllers with empty values
     _nameController = TextEditingController();
@@ -110,7 +113,6 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     });
     
     try {
-      // Get current user
       User? currentUser = _auth.currentUser;
       if (currentUser == null) {
         // Handle not logged in state
@@ -122,8 +124,16 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         );
         return;
       }
+
+
+      }
       
       String userId = currentUser.uid;
+
+      // Store the user ID
+      setState(() {
+        _userData['user_id'] = userId;
+      });
       
       // Load user data
       DocumentSnapshot userDoc = await _firestore.collection('user').doc(userId).get();
@@ -133,6 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         
         setState(() {
           _userData = {
+            'user_id': userId, // Keep the user ID
             'full_name': userData['full_name'] ?? '',
             'email': userData['email'] ?? '',
             'phone_number': userData['phone_number'] ?? '',
@@ -213,6 +224,9 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
         'full_name': _nameController.text.trim(),
         'phone_number': _phoneController.text.trim(),
         'date_of_birth': _dobController.text.trim(),
+        'is_currently_pregnant': _userData['is_currently_pregnant'],
+        'has_had_hypertension': _userData['has_had_hypertension'],
+        'pregnancy_count': _userData['pregnancy_count'],
       });
       
       // Update state
@@ -320,6 +334,29 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     }
   }
 
+  void _copyUserIdToClipboard() {
+    Clipboard.setData(ClipboardData(text: _userData['user_id']));
+    setState(() {
+      _showCopySuccess = true;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('User ID copied to clipboard'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    
+    // Hide the success message after 2 seconds
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _showCopySuccess = false;
+        });
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -343,6 +380,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
           tabs: const [
             Tab(text: 'Profile'),
             Tab(text: 'Next of Kin'),
+            Tab(text: 'Device'),
           ],
         ),
         actions: [
@@ -359,6 +397,7 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
             children: [
               _buildProfileTab(),
               _buildNextOfKinTab(),
+              _buildDeviceTab(),
             ],
           ),
       bottomNavigationBar: BottomNavBar(
@@ -783,5 +822,464 @@ class _SettingsScreenState extends State<SettingsScreen> with TickerProviderStat
     );
   }
   
+  Widget _buildDeviceTab() {
+  // Mask the user ID with asterisks, but keep first 4 and last 4 characters visible
+  String userId = _userData['user_id'];
+  String maskedUserId = userId;
   
+  if (userId.length > 8) {
+    String firstFour = userId.substring(0, 4);
+    String lastFour = userId.substring(userId.length - 4);
+    String middle = '*' * (userId.length - 8);
+    maskedUserId = '$firstFour$middle$lastFour';
+  }
+  
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Device Pairing',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Use this ID to pair your monitoring devices with your account. Tap the button to copy your ID.',
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // User ID display and copy field
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            maskedUserId,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontFamily: 'Courier',
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        decoration: const BoxDecoration(
+                          border: Border(
+                            left: BorderSide(color: Colors.grey),
+                          ),
+                        ),
+                        child: IconButton(
+                          icon: _showCopySuccess 
+                            ? const Icon(Icons.check, color: Colors.green)
+                            : const Icon(Icons.copy, color: Colors.indigo),
+                          onPressed: _copyUserIdToClipboard,
+                          tooltip: 'Copy User ID',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Image or illustration for device pairing
+                Container(
+                  width: double.infinity,
+                  height: 150,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.bluetooth_connected,
+                          size: 60,
+                          color: Colors.indigo[300],
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Device Pairing',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.indigo,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Device pairing instructions
+                Text(
+                  'How to pair your device:',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[800],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildInstructionStep(
+                  '1',
+                  'Turn on your monitoring device and ensure it is in pairing mode.',
+                ),
+                _buildInstructionStep(
+                  '2',
+                  'Copy your user ID by tapping the copy button above.',
+                ),
+                _buildInstructionStep(
+                  '3',
+                  'Open the device companion app and paste your user ID when prompted.',
+                ),
+                _buildInstructionStep(
+                  '4',
+                  'Follow the instructions in the companion app to complete pairing.',
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Paired devices section
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Paired Devices',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Example paired device item
+                _buildPairedDeviceItem(
+                  'BP Monitor',
+                  'Last synced: Today, 10:30 AM',
+                  Icons.favorite,
+                  Colors.red,
+                ),
+                const Divider(),
+                _buildPairedDeviceItem(
+                  'Activity Tracker',
+                  'Last synced: Yesterday, 8:15 PM',
+                  Icons.directions_walk,
+                  Colors.green,
+                ),
+                const Divider(),
+                _buildPairedDeviceItem(
+                  'Temperature Sensor',
+                  'Last synced: 2 days ago',
+                  Icons.thermostat,
+                  Colors.orange,
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Button to add new device
+                Center(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Looking for new devices...'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    icon: const Icon(Icons.add_circle_outline, color: Colors.white),
+                    label: const Text(
+                      'Add New Device',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Troubleshooting section
+        Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Troubleshooting',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.help_outline, color: Colors.orange),
+                  ),
+                  title: const Text('Having trouble with your device?'),
+                  subtitle: const Text('View our troubleshooting guide'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Opening troubleshooting guide...'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.support_agent, color: Colors.blue),
+                  ),
+                  title: const Text('Contact Support'),
+                  subtitle: const Text('Get help from our support team'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Opening support contact form...'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildInstructionStep(String number, String instruction) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: const BoxDecoration(
+            color: Colors.indigo,
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            instruction,
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildPairedDeviceItem(String name, String status, IconData icon, Color color) {
+  return Row(
+    children: [
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          icon,
+          color: color,
+          size: 24,
+        ),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              name,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              status,
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+      PopupMenuButton(
+        icon: const Icon(Icons.more_vert),
+        onSelected: (value) {
+          if (value == 'sync') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Syncing $name...')),
+            );
+          } else if (value == 'settings') {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Opening $name settings...')),
+            );
+          } else if (value == 'remove') {
+            // Show confirmation dialog
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text('Remove $name?'),
+                content: const Text('Are you sure you want to unpair this device? You will need to pair it again to use it.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('$name unpaired successfully')),
+                      );
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    child: const Text('Remove'),
+                  ),
+                ],
+              ),
+            );
+          }
+        },
+        itemBuilder: (context) => [
+          const PopupMenuItem(
+            value: 'sync',
+            child: Row(
+              children: [
+                Icon(Icons.sync, size: 18),
+                SizedBox(width: 8),
+                Text('Sync Now'),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'settings',
+            child: Row(
+              children: [
+                Icon(Icons.settings, size: 18),
+                SizedBox(width: 8),
+                Text('Device Settings'),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'remove',
+            child: Row(
+              children: [
+                Icon(Icons.link_off, size: 18),
+                SizedBox(width: 8),
+                Text('Unpair Device'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
 }

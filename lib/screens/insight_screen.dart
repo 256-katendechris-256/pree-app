@@ -28,17 +28,10 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
   DateTime _focusedDay = DateTime.now();
   
   // Selected category and navigation
-  int _selectedNavIndex = 0; // Keep only this declaration
+  int _selectedNavIndex = 2; // Set to 2 for Insights tab
   
-  // Insight data
-  Map<String, dynamic> _insightData = {
-    'generatedInsight': 'No insights available for this date.',
-    'active_minutes': '0',
-    'calories': '0',
-    'distance': '0',
-    'steps': '0',
-    'timestamp': DateTime.now(),
-  };
+  // Insight data - now a list to hold multiple insights for a day
+  List<Map<String, dynamic>> _insightsList = [];
   
   // Collection of insights by date
   Map<DateTime, List<Map<String, dynamic>>> _insightsByDate = {};
@@ -97,42 +90,71 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
       
       // Query insights for the selected date
       var insightDocs = await _firestore
-          .collection('Insite')
+          .collection('Insights')
           .where('user_id', isEqualTo: userId)
           .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
           .where('timestamp', isLessThanOrEqualTo: endOfDay)
           .orderBy('timestamp', descending: true)
-          .limit(1)
           .get();
       
+      List<Map<String, dynamic>> insightsList = [];
+      
       if (insightDocs.docs.isNotEmpty) {
-        var data = insightDocs.docs.first.data();
-        
-        if (mounted) {
-          setState(() {
-            _insightData = {
-              'generatedInsight': data['generatedInsight'] ?? 'No insights available.',
-              'active_minutes': data['active_minutes'] ?? '0',
-              'calories': data['calories'] ?? '0',
-              'distance': data['distance'] ?? '0',
-              'steps': data['steps'] ?? '0',
-              'timestamp': data['timestamp'] != null ? (data['timestamp'] as Timestamp).toDate() : DateTime.now(),
-            };
-          });
+        for (var doc in insightDocs.docs) {
+          var data = doc.data();
+          
+          Map<String, dynamic> insightData = {
+            'id': doc.id,
+            'generatedInsight': data['generatedInsight'] ?? 'No insight available.',
+            'timestamp': data['timestamp'] != null ? (data['timestamp'] as Timestamp).toDate() : DateTime.now(),
+            'type': data['type'] ?? 'general',
+            'source': data['source'] ?? '',
+            'sourceCollection': data['sourceCollection'] ?? '',
+          };
+          
+          // Add source data based on the collection type
+          if (data['sourceData'] != null) {
+            if (data['sourceCollection'] == 'activity') {
+              insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? '0';
+              insightData['calories'] = data['sourceData']['calories'] ?? '0';
+              insightData['distance'] = data['sourceData']['distance'] ?? '0';
+              insightData['steps'] = data['sourceData']['steps'] ?? '0';
+            } else if (data['sourceCollection'] == 'temperature') {
+              insightData['temperature'] = data['sourceData']['temperature'] ?? '0';
+              insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? '0';
+            } else if (data['sourceCollection'] == 'vital_signs') {
+              insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? '0';
+              insightData['diastolic'] = data['sourceData']['diastolic'] ?? '0';
+              insightData['pulse'] = data['sourceData']['pulse'] ?? '0';
+            } else if (data['sourceCollection'] == 'weight') {
+              insightData['weight'] = data['sourceData']['weight'] ?? '0';
+              insightData['bmi'] = data['sourceData']['bmi'] ?? '0';
+            }
+          } else {
+            // Handle legacy format or insights without sourceData
+            if (data['active_minutes'] != null) insightData['active_minutes'] = data['active_minutes'];
+            if (data['calories'] != null) insightData['calories'] = data['calories'];
+            if (data['distance'] != null) insightData['distance'] = data['distance'];
+            if (data['steps'] != null) insightData['steps'] = data['steps'];
+          }
+          
+          insightsList.add(insightData);
         }
-      } else {
-        if (mounted) {
-          setState(() {
-            _insightData = {
+      }
+      
+      if (mounted) {
+        setState(() {
+          _insightsList = insightsList;
+          
+          // If no insights available, show placeholder
+          if (_insightsList.isEmpty) {
+            _insightsList = [{
               'generatedInsight': 'No insights available for this date.',
-              'active_minutes': '0',
-              'calories': '0',
-              'distance': '0',
-              'steps': '0',
               'timestamp': date,
-            };
-          });
-        }
+              'type': 'general',
+            }];
+          }
+        });
       }
     } catch (e) {
       print('Error loading insights for date: $e');
@@ -148,7 +170,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
       
       // Query insights for date range
       var insightDocs = await _firestore
-          .collection('Insite')
+          .collection('Insights')
           .where('user_id', isEqualTo: userId)
           .where('timestamp', isGreaterThanOrEqualTo: thirtyDaysAgo)
           .orderBy('timestamp', descending: true)
@@ -165,15 +187,42 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
           insightsByDate[dateKey] = [];
         }
         
-        insightsByDate[dateKey]!.add({
-          'generatedInsight': data['generatedInsight'] ?? 'No insights available.',
-          'active_minutes': data['active_minutes'] ?? '0',
-          'calories': data['calories'] ?? '0',
-          'distance': data['distance'] ?? '0',
-          'steps': data['steps'] ?? '0',
-          'timestamp': timestamp,
+        Map<String, dynamic> insightData = {
           'id': doc.id,
-        });
+          'generatedInsight': data['generatedInsight'] ?? 'No insight available.',
+          'timestamp': timestamp,
+          'type': data['type'] ?? 'general',
+          'source': data['source'] ?? '',
+          'sourceCollection': data['sourceCollection'] ?? '',
+        };
+        
+        // Add source data based on the collection type
+        if (data['sourceData'] != null) {
+          if (data['sourceCollection'] == 'activity') {
+            insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? '0';
+            insightData['calories'] = data['sourceData']['calories'] ?? '0';
+            insightData['distance'] = data['sourceData']['distance'] ?? '0';
+            insightData['steps'] = data['sourceData']['steps'] ?? '0';
+          } else if (data['sourceCollection'] == 'temperature') {
+            insightData['temperature'] = data['sourceData']['temperature'] ?? '0';
+            insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? '0';
+          } else if (data['sourceCollection'] == 'vital_signs') {
+            insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? '0';
+            insightData['diastolic'] = data['sourceData']['diastolic'] ?? '0';
+            insightData['pulse'] = data['sourceData']['pulse'] ?? '0';
+          } else if (data['sourceCollection'] == 'weight') {
+            insightData['weight'] = data['sourceData']['weight'] ?? '0';
+            insightData['bmi'] = data['sourceData']['bmi'] ?? '0';
+          }
+        } else {
+          // Handle legacy format or insights without sourceData
+          if (data['active_minutes'] != null) insightData['active_minutes'] = data['active_minutes'];
+          if (data['calories'] != null) insightData['calories'] = data['calories'];
+          if (data['distance'] != null) insightData['distance'] = data['distance'];
+          if (data['steps'] != null) insightData['steps'] = data['steps'];
+        }
+        
+        insightsByDate[dateKey]!.add(insightData);
       }
       
       if (mounted) {
@@ -190,25 +239,49 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
   void _loadMockData() {
     if (mounted) {
       setState(() {
-        _insightData = {
-          'generatedInsight': "That's great that you're tracking your physical activity during pregnancy! Every step counts, no matter how small. Staying active is so important for your health and well-being during this special time. Keep up the good work, and remember that even gentle movement can have positive impacts on both you and your baby.",
-          'active_minutes': '101',
-          'calories': '320',
-          'distance': '2.5',
-          'steps': '4500',
-          'timestamp': DateTime.now(),
+        // Activity insight
+        final activityInsight = {
+          'generatedInsight': "ACTIVITY STATUS: LOW INTENSITY. Current level appropriate. Gentle, consistent activity supports circulation. Report any new symptoms promptly. Avoid long periods of inactivity.",
+          'active_minutes': '13',
+          'calories': '0',
+          'distance': '0',
+          'steps': '1',
+          'timestamp': DateTime.now().subtract(const Duration(minutes: 30)),
+          'type': 'clinical',
+          'sourceCollection': 'activity',
         };
+        
+        // Temperature insight
+        final temperatureInsight = {
+          'generatedInsight': "TEMPERATURE STATUS: BELOW NORMAL (0°C). Continue monitoring. Report if accompanied by other symptoms. Maintain adequate warming.",
+          'temperature': '0',
+          'heart_rate': '0',
+          'timestamp': DateTime.now().subtract(const Duration(hours: 1)),
+          'type': 'clinical',
+          'sourceCollection': 'temperature',
+        };
+        
+        // Generic insight for pregnancy
+        final generalInsight = {
+          'generatedInsight': "That's great that you're tracking your physical activity during pregnancy! Every step counts, no matter how small. Staying active is so important for your health and well-being during this special time. Keep up the good work, and remember that even gentle movement can have positive impacts on both you and your baby.",
+          'timestamp': DateTime.now().subtract(const Duration(hours: 3)),
+          'type': 'general',
+          'sourceCollection': '',
+        };
+        
+        _insightsList = [temperatureInsight, activityInsight, generalInsight];
         
         // Create some mock data for the calendar
         _insightsByDate = {
-          DateTime.now(): [_insightData],
+          DateTime.now(): _insightsList,
           DateTime.now().subtract(const Duration(days: 1)): [{
             'generatedInsight': "Your blood pressure readings are looking stable. Continue with your current routine and remember to take your measurements at consistent times.",
-            'active_minutes': '85',
-            'calories': '280',
-            'distance': '2.1',
-            'steps': '3800',
+            'systolic_BP': '120',
+            'diastolic': '80',
+            'pulse': '72',
             'timestamp': DateTime.now().subtract(const Duration(days: 1)),
+            'type': 'clinical',
+            'sourceCollection': 'vital_signs',
           }],
           DateTime.now().subtract(const Duration(days: 2)): [{
             'generatedInsight': "I notice you've been consistently active this week. This is excellent for maintaining healthy blood pressure levels during pregnancy.",
@@ -217,6 +290,8 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
             'distance': '3.0',
             'steps': '5200',
             'timestamp': DateTime.now().subtract(const Duration(days: 2)),
+            'type': 'clinical',
+            'sourceCollection': 'activity',
           }],
         };
         
@@ -245,24 +320,19 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
         // Use mock data for selected day if not logged in
         setState(() {
           if (_insightsByDate.containsKey(selectedDay)) {
-            _insightData = _insightsByDate[selectedDay]![0];
+            _insightsList = _insightsByDate[selectedDay]!;
           } else {
-            _insightData = {
+            _insightsList = [{
               'generatedInsight': 'No insights available for this date.',
-              'active_minutes': '0',
-              'calories': '0',
-              'distance': '0',
-              'steps': '0',
               'timestamp': selectedDay,
-            };
+              'type': 'general',
+            }];
           }
           _isLoading = false;
         });
       }
     }
   }
-  
-  // Removed duplicate _selectedNavIndex declaration
 
   @override
   Widget build(BuildContext context) {
@@ -278,10 +348,6 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
             fontSize: 22,
             fontWeight: FontWeight.w600,
           ),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           IconButton(
@@ -303,8 +369,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               children: [
                 _buildCalendar(),
                 _buildDateHeader(),
-                _buildInsightCard(),
-                _buildActivitySummary(),
+                ..._buildInsightCards(),
               ],
             ),
           ),
@@ -312,7 +377,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
         selectedIndex: _selectedNavIndex,
         onItemTapped: (index) {
           if (index == _selectedNavIndex) {
-            return; // Already on Dashboard screen
+            return; // Already on Insights screen
           }
           setState(() {
             _selectedNavIndex = index;
@@ -338,7 +403,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
           }
         },
       ),
-    ); // Added missing closing bracket here
+    );
   }
   
   Widget _buildCalendar() {
@@ -412,7 +477,86 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
     );
   }
   
-  Widget _buildInsightCard() {
+  List<Widget> _buildInsightCards() {
+    List<Widget> cards = [];
+    
+    if (_insightsList.isEmpty) {
+      cards.add(
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(
+              child: Text('No insights available for this date.'),
+            ),
+          ),
+        )
+      );
+      return cards;
+    }
+    
+    // Build a card for each insight
+    for (var insight in _insightsList) {
+      cards.add(_buildInsightCard(insight));
+      
+      // For activity insights, add activity summary card
+      if (insight['sourceCollection'] == 'activity') {
+        cards.add(_buildActivitySummary(insight));
+      }
+      // For vital signs insights, add blood pressure summary card
+      else if (insight['sourceCollection'] == 'vital_signs') {
+        cards.add(_buildVitalSignsSummary(insight));
+      }
+      // For temperature insights, add temperature summary card
+      else if (insight['sourceCollection'] == 'temperature') {
+        cards.add(_buildTemperatureSummary(insight));
+      }
+      // For weight insights, add weight summary card
+      else if (insight['sourceCollection'] == 'weight') {
+        cards.add(_buildWeightSummary(insight));
+      }
+    }
+    
+    return cards;
+  }
+  
+  Widget _buildInsightCard(Map<String, dynamic> insight) {
+    // Determine icon and color based on insight type
+    IconData icon;
+    Color color;
+    String title;
+    
+    switch (insight['sourceCollection']) {
+      case 'activity':
+        icon = Icons.directions_run;
+        color = Colors.green;
+        title = 'Activity Insight';
+        break;
+      case 'temperature':
+        icon = Icons.thermostat;
+        color = Colors.red;
+        title = 'Temperature Insight';
+        break;
+      case 'vital_signs':
+        icon = Icons.favorite;
+        color = Colors.red;
+        title = 'Blood Pressure Insight';
+        break;
+      case 'weight':
+        icon = Icons.monitor_weight;
+        color = Colors.blue;
+        title = 'Weight Insight';
+        break;
+      default:
+        icon = Icons.lightbulb_outline;
+        color = Colors.indigo;
+        title = 'Daily Insight';
+    }
+    
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -429,29 +573,29 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.1),
+                    color: color.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.lightbulb_outline,
-                    color: Colors.indigo,
+                  child: Icon(
+                    icon,
+                    color: color,
                     size: 24,
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  'Daily Insight',
+                Text(
+                  title,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: Colors.indigo,
+                    color: color,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             Text(
-              _insightData['generatedInsight'],
+              insight['generatedInsight'],
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[800],
@@ -459,9 +603,9 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               ),
             ),
             const SizedBox(height: 12),
-            if (_insightData['timestamp'] != null)
+            if (insight['timestamp'] != null)
               Text(
-                'Generated on: ${DateFormat('h:mm a').format(_insightData['timestamp'])}',
+                'Generated on: ${DateFormat('h:mm a').format(insight['timestamp'])}',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.grey[600],
@@ -474,7 +618,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
     );
   }
   
-  Widget _buildActivitySummary() {
+  Widget _buildActivitySummary(Map<String, dynamic> insight) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
@@ -491,7 +635,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.indigo,
+                color: Colors.green,
               ),
             ),
             const SizedBox(height: 16),
@@ -500,13 +644,13 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               children: [
                 _buildMetricItem(
                   icon: Icons.directions_walk,
-                  value: _insightData['steps'],
+                  value: insight['steps'] ?? '0',
                   label: 'Steps',
                   color: Colors.blue,
                 ),
                 _buildMetricItem(
                   icon: Icons.access_time,
-                  value: _insightData['active_minutes'],
+                  value: insight['active_minutes'] ?? '0',
                   label: 'Active Min',
                   color: Colors.green,
                 ),
@@ -518,15 +662,153 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               children: [
                 _buildMetricItem(
                   icon: Icons.local_fire_department,
-                  value: _insightData['calories'],
+                  value: insight['calories'] ?? '0',
                   label: 'Calories',
                   color: Colors.orange,
                 ),
                 _buildMetricItem(
                   icon: Icons.straighten,
-                  value: _insightData['distance'],
+                  value: insight['distance'] ?? '0',
                   label: 'Distance (km)',
                   color: Colors.purple,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildVitalSignsSummary(Map<String, dynamic> insight) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Blood Pressure Summary',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMetricItem(
+                  icon: Icons.arrow_upward,
+                  value: insight['systolic_BP'] ?? '0',
+                  label: 'Systolic',
+                  color: Colors.red,
+                ),
+                _buildMetricItem(
+                  icon: Icons.arrow_downward,
+                  value: insight['diastolic'] ?? '0',
+                  label: 'Diastolic',
+                  color: Colors.blue,
+                ),
+                _buildMetricItem(
+                  icon: Icons.favorite,
+                  value: insight['pulse'] ?? '0',
+                  label: 'Pulse',
+                  color: Colors.purple,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildTemperatureSummary(Map<String, dynamic> insight) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Temperature Summary',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMetricItem(
+                  icon: Icons.thermostat,
+                  value: '${insight['temperature'] ?? '0'} °C',
+                  label: 'Temperature',
+                  color: Colors.red,
+                ),
+                _buildMetricItem(
+                  icon: Icons.favorite,
+                  value: insight['heart_rate'] ?? '0',
+                  label: 'Heart Rate',
+                  color: Colors.purple,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildWeightSummary(Map<String, dynamic> insight) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Weight Summary',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMetricItem(
+                  icon: Icons.monitor_weight,
+                  value: '${insight['weight'] ?? '0'} kg',
+                  label: 'Weight',
+                  color: Colors.blue,
+                ),
+                _buildMetricItem(
+                  icon: Icons.calculate,
+                  value: insight['bmi'] ?? '0',
+                  label: 'BMI',
+                  color: Colors.green,
                 ),
               ],
             ),
@@ -576,5 +858,4 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
       ],
     );
   }
-  
 }

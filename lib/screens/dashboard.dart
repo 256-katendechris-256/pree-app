@@ -166,7 +166,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       var weeklyReadingsDoc = await _firestore
           .collection('vital_signs')
           .where('user_id', isEqualTo: userId)
-          .orderBy('timestamp', descending: true)
+          .orderBy('timestamp', descending: false)
           .limit(7)
           .get();
 
@@ -267,10 +267,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         var data = latestWeightDoc.docs.first.data();
         
         // Parse values with proper handling
-        double weight = double.tryParse(data['weight'] ?? '0.0') ?? 0.0;
-        double bmi = double.tryParse(data['current'] ?? '0.0') ?? 0.0;
+        double weight = double.tryParse(data['weight']) ?? 0.0;
+        double bmi = double.tryParse(data['current'] ) ?? 0.0;
         String status = data['status'] ?? 'Unknown';
-        String change = data['change'] ?? '+0.0';
+        String change = data['change'] ;
         Timestamp timestamp = data['timestamp'];
         
         if (mounted) {

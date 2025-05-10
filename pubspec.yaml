@@ -23,10 +23,16 @@ dependencies:
   go_router: ^13.2.1
 
   # Firebase
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.16.0
-  cloud_firestore: ^4.14.0
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.5.3
+  cloud_firestore: ^5.6.7
   google_sign_in: ^6.3.0
+
+  pdf: ^3.10.7
+  path_provider: ^2.1.2
+  open_file: ^3.3.2
+  share_plus: ^7.2.1
+  permission_handler: ^11.0.1
   
   # Utilities
   dartz: ^0.10.1

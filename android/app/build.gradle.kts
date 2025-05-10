@@ -8,7 +8,7 @@ plugins {
 
 dependencies {
     // Import the Firebase BoM
-    implementation(platform("com.google.firebase:firebase-bom:33.11.0"))
+    implementation(platform("com.google.firebase:firebase-bom:33.13.0"))
 
     // Firebase Analytics
     implementation("com.google.firebase:firebase-analytics")

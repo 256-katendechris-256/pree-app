@@ -11,6 +11,13 @@ import '../screens/settings_screen.dart';
 import '../screens/weight.dart';
 import '../screens/activity.dart';
 import '../widgets/bottom_nav_bar.dart'; // Adjust the path based on your file structure
+import 'dart:io';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -142,7 +149,7 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
     try {
       // Query blood pressure readings within date range
       var bpDocs = await _firestore
-          .collection('blood_pressure')
+          .collection('vital_signs')
           .where('user_id', isEqualTo: userId)
           .where('timestamp', isGreaterThanOrEqualTo: _startDate)
           .where('timestamp', isLessThanOrEqualTo: _endDate)
@@ -156,12 +163,12 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
           var data = doc.data();
           
           // Parse values, handling potential string values
-          int systolic = int.tryParse(data['systolic'] ?? '0') ?? 0;
-          int diastolic = int.tryParse(data['diastolic'] ?? '0') ?? 0;
-          int pulse = int.tryParse(data['pulse'] ?? '0') ?? 0;
+          int systolic = int.tryParse(data['systolic_BP'] ) ?? 0;
+          int diastolic = int.tryParse(data['diastolic'] ) ?? 0;
+          int pulse = int.tryParse(data['pulse'] ) ?? 0;
           
           bpReadings.add({
-            'systolic': systolic,
+            'systolic_BP': systolic,
             'diastolic': diastolic,
             'pulse': pulse,
             'timestamp': data['timestamp'],
@@ -198,8 +205,8 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
           var data = doc.data();
           
           // Parse values
-          double weight = double.tryParse(data['weight'] ?? '0.0') ?? 0.0;
-          double bmi = double.tryParse(data['bmi'] ?? '0.0') ?? 0.0;
+          double weight = double.tryParse(data['current']) ?? 0.0;
+          double bmi = double.tryParse(data['bmi'] ) ?? 0.0;
           
           weightReadings.add({
             'weight': weight,
@@ -284,21 +291,21 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
     int systolicSum = 0;
     int diastolicSum = 0;
     for (var reading in bpList) {
-      if (reading['systolic'] > _summaryMetrics['bp_highest']['systolic']) {
+      if (reading['systolic_BP'] > _summaryMetrics['bp_highest']['systolic']) {
         _summaryMetrics['bp_highest'] = {
-          'systolic': reading['systolic'],
+          'systolic': reading['systolic_BP'],
           'diastolic': reading['diastolic'],
           'date': reading['date'],
         };
       }
-      if (reading['systolic'] < _summaryMetrics['bp_lowest']['systolic']) {
+      if (reading['systolic_BP'] < _summaryMetrics['bp_lowest']['systolic']) {
         _summaryMetrics['bp_lowest'] = {
-          'systolic': reading['systolic'],
+          'systolic': reading['systolic_BP'],
           'diastolic': reading['diastolic'],
           'date': reading['date'],
         };
       }
-      systolicSum += reading['systolic'] as int;
+      systolicSum += reading['systolic_BP'] as int;
       diastolicSum += reading['diastolic'] as int;
     }
     _summaryMetrics['bp_average'] = {
@@ -318,9 +325,9 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
           'date': reading['date'],
         };
       }
-      if (reading['weight'] < _summaryMetrics['weight_lowest']['value']) {
+      if (reading['current'] < _summaryMetrics['weight_lowest']['value']) {
         _summaryMetrics['weight_lowest'] = {
-          'value': reading['weight'],
+          'value': reading['current'],
           'date': reading['date'],
         };
       }
@@ -436,18 +443,679 @@ Future<void> _generateFullReport() async {
   setState(() {
     _isGeneratingReport = true;
   });
-  await Future.delayed(const Duration(seconds: 2));
-  if (mounted) {
-    setState(() {
-      _isGeneratingReport = false;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Health report generated and ready to download'),
-        duration: Duration(seconds: 3),
+  
+  try {
+    // Request storage permission for Android
+    if (Platform.isAndroid) {
+      var status = await Permission.storage.request();
+      if (!status.isGranted) {
+        throw Exception('Storage permission denied');
+      }
+    }
+    
+    // Create PDF document
+    final pdf = pw.Document();
+    
+    // Add title page
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) {
+          return pw.Center(
+            child: pw.Column(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              children: [
+                pw.Text(
+                  'Health Report',
+                  style: pw.TextStyle(
+                    fontSize: 28,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+                pw.Text(
+                  'Generated on ${DateFormat('MMMM d, yyyy').format(DateTime.now())}',
+                  style: const pw.TextStyle(fontSize: 16),
+                ),
+                pw.SizedBox(height: 40),
+                pw.Text(
+                  'Report Period:',
+                  style: const pw.TextStyle(fontSize: 14),
+                ),
+                pw.SizedBox(height: 8),
+                pw.Text(
+                  '${DateFormat('MMM d, yyyy').format(_startDate)} - ${DateFormat('MMM d, yyyy').format(_endDate)}',
+                  style: const pw.TextStyle(fontSize: 16),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
+    
+    // Add summary page
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(
+                'Health Summary',
+                style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              
+              // Overall stats
+              pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Overall Statistics',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 10),
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                      children: [
+                        pw.Column(
+                          children: [
+                            pw.Text(
+                              'BP Average',
+                              style: const pw.TextStyle(fontSize: 12),
+                            ),
+                            pw.SizedBox(height: 5),
+                            pw.Text(
+                              '${_summaryMetrics['bp_average']['systolic']}/${_summaryMetrics['bp_average']['diastolic']}',
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        pw.Column(
+                          children: [
+                            pw.Text(
+                              'Weight Average',
+                              style: const pw.TextStyle(fontSize: 12),
+                            ),
+                            pw.SizedBox(height: 5),
+                            pw.Text(
+                              '${_summaryMetrics['weight_average']} kg',
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                        pw.Column(
+                          children: [
+                            pw.Text(
+                              'Average Steps',
+                              style: const pw.TextStyle(fontSize: 12),
+                            ),
+                            pw.SizedBox(height: 5),
+                            pw.Text(
+                              '${_summaryMetrics['steps_average']}',
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              
+              pw.SizedBox(height: 20),
+              
+              // Blood pressure section
+              if (_reportData['blood_pressure'].isNotEmpty) ...[
+                pw.Text(
+                  'Blood Pressure',
+                  style: pw.TextStyle(
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildPdfMetricBox(
+                      'Highest',
+                      '${_summaryMetrics['bp_highest']['systolic']}/${_summaryMetrics['bp_highest']['diastolic']}',
+                      'Date: ${DateFormat('MM/dd').format(_summaryMetrics['bp_highest']['date'])}'
+                    ),
+                    _buildPdfMetricBox(
+                      'Lowest',
+                      '${_summaryMetrics['bp_lowest']['systolic']}/${_summaryMetrics['bp_lowest']['diastolic']}',
+                      'Date: ${DateFormat('MM/dd').format(_summaryMetrics['bp_lowest']['date'])}'
+                    ),
+                    _buildPdfMetricBox(
+                      'Average',
+                      '${_summaryMetrics['bp_average']['systolic']}/${_summaryMetrics['bp_average']['diastolic']}',
+                      ''
+                    ),
+                  ],
+                ),
+              ],
+              
+              pw.SizedBox(height: 20),
+              
+              // Weight section
+              if (_reportData['weight'].isNotEmpty) ...[
+                pw.Text(
+                  'Weight',
+                  style: pw.TextStyle(
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildPdfMetricBox(
+                      'Highest',
+                      '${_summaryMetrics['weight_highest']['value'].toStringAsFixed(1)} kg',
+                      'Date: ${DateFormat('MM/dd').format(_summaryMetrics['weight_highest']['date'])}'
+                    ),
+                    _buildPdfMetricBox(
+                      'Lowest',
+                      '${_summaryMetrics['weight_lowest']['value'].toStringAsFixed(1)} kg',
+                      'Date: ${DateFormat('MM/dd').format(_summaryMetrics['weight_lowest']['date'])}'
+                    ),
+                    _buildPdfMetricBox(
+                      'Average',
+                      '${_summaryMetrics['weight_average']} kg',
+                      ''
+                    ),
+                  ],
+                ),
+              ],
+              
+              pw.SizedBox(height: 20),
+              
+              // Activity section
+              if (_reportData['activity'].isNotEmpty) ...[
+                pw.Text(
+                  'Activity',
+                  style: pw.TextStyle(
+                    fontSize: 16,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    _buildPdfMetricBox(
+                      'Highest Steps',
+                      '${_summaryMetrics['steps_highest']['value']}',
+                      'Date: ${DateFormat('MM/dd').format(_summaryMetrics['steps_highest']['date'])}'
+                    ),
+                    _buildPdfMetricBox(
+                      'Average Steps',
+                      '${_summaryMetrics['steps_average']}',
+                      ''
+                    ),
+                    _buildPdfMetricBox(
+                      'Active Minutes',
+                      '${_summaryMetrics['total_activity_minutes']}',
+                      'Total'
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+    
+    // Add detailed pages for each category
+    if (_reportData['blood_pressure'].isNotEmpty) {
+      pdf.addPage(_createBloodPressureDetailPage());
+    }
+    
+    if (_reportData['weight'].isNotEmpty) {
+      pdf.addPage(_createWeightDetailPage());
+    }
+    
+    if (_reportData['activity'].isNotEmpty) {
+      pdf.addPage(_createActivityDetailPage());
+    }
+    
+    // Save the PDF file
+    final String dir;
+    final String fileName = 'health_report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf';
+    
+    if (Platform.isAndroid) {
+      dir = (await getExternalStorageDirectory())!.path;
+    } else if (Platform.isIOS) {
+      dir = (await getApplicationDocumentsDirectory()).path;
+    } else {
+      dir = (await getDownloadsDirectory())!.path;
+    }
+    
+    final file = File('$dir/$fileName');
+    await file.writeAsBytes(await pdf.save());
+    
+    // Share or open the file
+    if (Platform.isIOS || Platform.isAndroid) {
+      await Share.shareFiles([file.path], text: 'Your Health Report');
+    } else {
+      await OpenFile.open(file.path);
+    }
+    
+    if (mounted) {
+      setState(() {
+        _isGeneratingReport = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Health report saved to $fileName'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Open',
+            onPressed: () async {
+              await OpenFile.open(file.path);
+            },
+          ),
+        ),
+      );
+    }
+    
+  } catch (e) {
+    print('Error generating report: $e');
+    if (mounted) {
+      setState(() {
+        _isGeneratingReport = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error generating report: $e'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
   }
+}
+
+// Helper method to create a metric box for the PDF
+pw.Widget _buildPdfMetricBox(String title, String value, String subtitle) {
+  return pw.Container(
+    width: 120,
+    padding: const pw.EdgeInsets.all(10),
+    decoration: pw.BoxDecoration(
+      border: pw.Border.all(color: PdfColors.grey300),
+      borderRadius: pw.BorderRadius.circular(5),
+    ),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.Text(
+          title,
+          style: const pw.TextStyle(
+            fontSize: 12,
+          ),
+        ),
+        pw.SizedBox(height: 5),
+        pw.Text(
+          value,
+          style: pw.TextStyle(
+            fontSize: 14,
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        if (subtitle.isNotEmpty) ...[
+          pw.SizedBox(height: 3),
+          pw.Text(
+            subtitle,
+            style: const pw.TextStyle(
+              fontSize: 10,
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+// Create a detail page for blood pressure readings
+pw.Page _createBloodPressureDetailPage() {
+  // Sort readings by date
+  final sortedReadings = List<Map<String, dynamic>>.from(_reportData['blood_pressure'])
+    ..sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+  
+  return pw.Page(
+    build: (pw.Context context) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Blood Pressure Readings',
+            style: pw.TextStyle(
+              fontSize: 20,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'Period: ${DateFormat('MMM d, yyyy').format(_startDate)} - ${DateFormat('MMM d, yyyy').format(_endDate)}',
+            style: const pw.TextStyle(fontSize: 12),
+          ),
+          pw.SizedBox(height: 20),
+          
+          // Table header
+          pw.Container(
+            color: PdfColors.grey200,
+            padding: const pw.EdgeInsets.all(5),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 3,
+                  child: pw.Text(
+                    'Date',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Systolic',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Diastolic',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Pulse',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Status',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Table rows
+          pw.ListView.builder(
+            itemCount: sortedReadings.length,
+            itemBuilder: (context, index) {
+              final reading = sortedReadings[index];
+              final date = reading['date'] as DateTime;
+              final category = _getBPCategory(reading['systolic'], reading['diastolic']);
+              
+              return pw.Container(
+                color: index % 2 == 0 ? PdfColors.grey100 : PdfColors.white,
+                padding: const pw.EdgeInsets.all(5),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Text(DateFormat('MM/dd/yyyy HH:mm').format(date)),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['systolic']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['diastolic']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['pulse']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text(category),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
+// Create a detail page for weight readings
+pw.Page _createWeightDetailPage() {
+  // Sort readings by date
+  final sortedReadings = List<Map<String, dynamic>>.from(_reportData['weight'])
+    ..sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+  
+  return pw.Page(
+    build: (pw.Context context) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Weight Readings',
+            style: pw.TextStyle(
+              fontSize: 20,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'Period: ${DateFormat('MMM d, yyyy').format(_startDate)} - ${DateFormat('MMM d, yyyy').format(_endDate)}',
+            style: const pw.TextStyle(fontSize: 12),
+          ),
+          pw.SizedBox(height: 20),
+          
+          // Table header
+          pw.Container(
+            color: PdfColors.grey200,
+            padding: const pw.EdgeInsets.all(5),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 3,
+                  child: pw.Text(
+                    'Date',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Weight (kg)',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'BMI',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Table rows
+          pw.ListView.builder(
+            itemCount: sortedReadings.length,
+            itemBuilder: (context, index) {
+              final reading = sortedReadings[index];
+              final date = reading['date'] as DateTime;
+              
+              return pw.Container(
+                color: index % 2 == 0 ? PdfColors.grey100 : PdfColors.white,
+                padding: const pw.EdgeInsets.all(5),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Text(DateFormat('MM/dd/yyyy HH:mm').format(date)),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['weight'].toStringAsFixed(1)}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['bmi'].toStringAsFixed(1)}'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
+// Create a detail page for activity readings
+pw.Page _createActivityDetailPage() {
+  // Sort readings by date
+  final sortedReadings = List<Map<String, dynamic>>.from(_reportData['activity'])
+    ..sort((a, b) => (b['date'] as DateTime).compareTo(a['date'] as DateTime));
+  
+  return pw.Page(
+    build: (pw.Context context) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Activity Records',
+            style: pw.TextStyle(
+              fontSize: 20,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'Period: ${DateFormat('MMM d, yyyy').format(_startDate)} - ${DateFormat('MMM d, yyyy').format(_endDate)}',
+            style: const pw.TextStyle(fontSize: 12),
+          ),
+          pw.SizedBox(height: 20),
+          
+          // Table header
+          pw.Container(
+            color: PdfColors.grey200,
+            padding: const pw.EdgeInsets.all(5),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 3,
+                  child: pw.Text(
+                    'Date',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Steps',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Distance (km)',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Calories',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Expanded(
+                  flex: 2,
+                  child: pw.Text(
+                    'Active Min',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Table rows
+          pw.ListView.builder(
+            itemCount: sortedReadings.length,
+            itemBuilder: (context, index) {
+              final reading = sortedReadings[index];
+              final date = reading['date'] as DateTime;
+              
+              return pw.Container(
+                color: index % 2 == 0 ? PdfColors.grey100 : PdfColors.white,
+                padding: const pw.EdgeInsets.all(5),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Text(DateFormat('MM/dd/yyyy').format(date)),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['steps']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['distance']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['calories']}'),
+                    ),
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Text('${reading['active_minutes']}'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    },
+  );
 }
 
   @override
