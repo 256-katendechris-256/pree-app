@@ -6,11 +6,11 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// Add this block to read the key.properties file
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file('key.properties')
+// Load keystore properties
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = java.util.Properties()
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
 }
 
 dependencies {
@@ -35,13 +35,13 @@ android {
         jvmTarget = JavaVersion.VERSION_1_8.toString()
     }
 
-    // Add the signingConfigs block before defaultConfig
+    // Add the signingConfigs block
     signingConfigs {
-        release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-            storePassword keystoreProperties['storePassword']
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = keystoreProperties["storeFile"]?.let { file(it.toString()) }
+            storePassword = keystoreProperties["storePassword"] as String
         }
     }
 
@@ -57,9 +57,9 @@ android {
     }
 
     buildTypes {
-        release {
-            // Change this line to use your release signing config
-            signingConfig = signingConfigs.release
+        getByName("release") {
+            // Change to use release signing config
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
