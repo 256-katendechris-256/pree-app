@@ -298,7 +298,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
   // Process vitals
   for (var doc in vitalSignsSnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = doc.data();
     final timestamp = data['timestamp'] as Timestamp?;
     final systolic = data['systolic_BP'] as int?;
 
@@ -313,7 +313,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
   // Process activity
   for (var doc in activitySnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = doc.data();
     final timestamp = data['timestamp'] as Timestamp?;
     final steps = data['steps'] as int?;
 
@@ -328,7 +328,7 @@ class _HealthOverviewScreenState extends State<HealthOverviewScreen> with Ticker
 
   // Process weight
   for (var doc in weightSnapshot.docs) {
-    final data = doc.data() as Map<String, dynamic>;
+    final data = doc.data();
     final timestamp = data['timestamp'] as Timestamp?;
     final current = (data['current'] as num?)?.toDouble();
 

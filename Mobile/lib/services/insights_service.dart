@@ -28,7 +28,7 @@ class InsightsService {
           {
             'timestamp':
                 DateTime.now()
-                    .subtract(Duration(days: 1))
+                    .subtract(const Duration(days: 1))
                     .millisecondsSinceEpoch,
             'systolic': 120,
             'diastolic': 78,

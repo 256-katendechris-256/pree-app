@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../screens/dashboard.dart';
 import 'overview.dart';
 
 class ActivityScreen extends StatefulWidget {

@@ -1,9 +1,16 @@
-name: finale
+name: eclipsa
 description: "A comprehensive Flutter project with modern dependencies and configurations."
 
 publish_to: 'none'
 
 version: 1.0.0+1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+#  adaptive_icon_background: "#1a3fb2" # Or path to background image
+#  adaptive_icon_foreground: "assets/icon/foreground.png" # Need to create this
 
 environment:
   sdk: '>=3.7.2 <4.0.0'
@@ -50,6 +57,8 @@ dependencies:
   table_calendar: ^3.0.9
   
 dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
+
   flutter_test:
     sdk: flutter
 
