@@ -37,32 +37,21 @@ jobs:
       - name: Run tests
         run: flutter test
       
-      - name: Set up keystore
+      - name: Setup debug keystore
         run: |
-          # Create a temporary file with the base64 content
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" > keystore-base64.txt
+          # Create debug keystore with known credentials
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US"
           
-          # Create directory if it doesn't exist
-          mkdir -p android/app
+          # Display the SHA-1 of this keystore (for adding to Firebase)
+          keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
           
-          # Decode the base64 file properly
-          base64 --decode keystore-base64.txt > android/app/release-key.jks
-          
-          # Verify the keystore exists
-          ls -la android/app/release-key.jks
-          
-          # Create key.properties
-          echo "keyAlias=release" > android/key.properties
-          echo "keyPassword=finale" >> android/key.properties
-          echo "storeFile=../app/release-key.jks" >> android/key.properties
-          echo "storePassword=finale" >> android/key.properties
-          
-          # Debug info
-          echo "Contents of key.properties:"
-          cat android/key.properties
-    
-      
-      
+          # Modify build.gradle to use debug signing config for release builds too
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' android/app/build.gradle
+          elif [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/signingConfig = signingConfigs.getByName("release")/signingConfig = signingConfigs.getByName("debug")/g' android/app/build.gradle.kts
+          fi
       
       - name: Build APK
         run: flutter build apk --release
@@ -87,7 +76,7 @@ jobs:
           # Upload APK to Firebase App Distribution
           firebase appdistribution:distribute "build/app/outputs/flutter-apk/app-release.apk" \
             --app "${{ secrets.FIREBASE_APP_ID }}" \
-            --release-notes "Version ${{ github.run_number }} from CI"
+            --release-notes "Version ${{ github.run_number }} from CI (Debug Signing)"
                    
           # Clean up
           rm -f service-account.json
