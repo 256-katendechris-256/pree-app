@@ -66,6 +66,10 @@ dev_dependencies:
   
   # Testing
   mockito: ^5.4.4
+  firebase_core_platform_interface: ^5.0.0  # Add this
+  firebase_auth_platform_interface: ^7.0.0  # Add this if using FirebaseAuth
+  firebase_core: ^3.13.0
+  firebase_auth: ^5.5.3
   
   # Code generation
   build_runner: ^2.4.8

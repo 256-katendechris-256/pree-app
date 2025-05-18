@@ -90,7 +90,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
       
       // Query insights for the selected date
       var insightDocs = await _firestore
-          .collection('Insights')
+          .collection('Insites')
           .where('user_id', isEqualTo: userId)
           .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
           .where('timestamp', isLessThanOrEqualTo: endOfDay)
@@ -115,19 +115,19 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
           // Add source data based on the collection type
           if (data['sourceData'] != null) {
             if (data['sourceCollection'] == 'activity') {
-              insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? '0';
-              insightData['calories'] = data['sourceData']['calories'] ?? '0';
-              insightData['distance'] = data['sourceData']['distance'] ?? '0';
-              insightData['steps'] = data['sourceData']['steps'] ?? '0';
+              insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? 0;
+              insightData['calories'] = data['sourceData']['calories'] ?? 0;
+              insightData['distance'] = data['sourceData']['distance'] ?? 0;
+              insightData['steps'] = data['sourceData']['steps'] ?? 0;
             } else if (data['sourceCollection'] == 'temperature') {
-              insightData['temperature'] = data['sourceData']['temperature'] ?? '0';
-              insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? '0';
+              insightData['temperature'] = data['sourceData']['temperature'] ?? 0;
+              insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? 0;
             } else if (data['sourceCollection'] == 'vital_signs') {
-              insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? '0';
-              insightData['diastolic'] = data['sourceData']['diastolic'] ?? '0';
-              insightData['pulse'] = data['sourceData']['pulse'] ?? '0';
+              insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? 0;
+              insightData['diastolic'] = data['sourceData']['diastolic'] ?? 0;
+              insightData['pulse'] = data['sourceData']['pulse'] ?? 0;
             } else if (data['sourceCollection'] == 'weight') {
-              insightData['weight'] = data['sourceData']['weight'] ?? '0';
+              insightData['weight'] = data['sourceData']['current'] ?? 0;
               insightData['bmi'] = data['sourceData']['bmi'] ?? '0';
             }
           } else {
@@ -170,7 +170,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
       
       // Query insights for date range
       var insightDocs = await _firestore
-          .collection('Insights')
+          .collection('Insites')
           .where('user_id', isEqualTo: userId)
           .where('timestamp', isGreaterThanOrEqualTo: thirtyDaysAgo)
           .orderBy('timestamp', descending: true)
@@ -199,20 +199,20 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
         // Add source data based on the collection type
         if (data['sourceData'] != null) {
           if (data['sourceCollection'] == 'activity') {
-            insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? '0';
-            insightData['calories'] = data['sourceData']['calories'] ?? '0';
-            insightData['distance'] = data['sourceData']['distance'] ?? '0';
-            insightData['steps'] = data['sourceData']['steps'] ?? '0';
+            insightData['active_minutes'] = data['sourceData']['active_minutes'] ?? 0;
+            insightData['calories'] = data['sourceData']['calories'] ?? 0;
+            insightData['distance'] = data['sourceData']['distance'] ?? 0;
+            insightData['steps'] = data['sourceData']['steps'] ?? 0;
           } else if (data['sourceCollection'] == 'temperature') {
-            insightData['temperature'] = data['sourceData']['temperature'] ?? '0';
-            insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? '0';
+            insightData['temperature'] = data['sourceData']['temperature'] ?? 0;
+            insightData['heart_rate'] = data['sourceData']['heart_rate'] ?? 0;
           } else if (data['sourceCollection'] == 'vital_signs') {
-            insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? '0';
-            insightData['diastolic'] = data['sourceData']['diastolic'] ?? '0';
-            insightData['pulse'] = data['sourceData']['pulse'] ?? '0';
+            insightData['systolic_BP'] = data['sourceData']['systolic_BP'] ?? 0;
+            insightData['diastolic'] = data['sourceData']['diastolic'] ?? 0;
+            insightData['pulse'] = data['sourceData']['pulse'] ?? 0;
           } else if (data['sourceCollection'] == 'weight') {
-            insightData['weight'] = data['sourceData']['weight'] ?? '0';
-            insightData['bmi'] = data['sourceData']['bmi'] ?? '0';
+            insightData['weight'] = data['sourceData']['weight'] ?? 0;
+            insightData['bmi'] = data['sourceData']['bmi'] ?? 0;
           }
         } else {
           // Handle legacy format or insights without sourceData

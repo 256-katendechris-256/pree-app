@@ -69,16 +69,43 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
   };
 
   @override
-  void initState() {
-    super.initState();
-    
-    // Initialize tab controller
-    _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(_handleTabSelection);
-    
-    // Load report data
-    _loadReportData();
-  }
+void initState() {
+  super.initState();
+  
+  // Initialize tab controller
+  _tabController = TabController(length: 3, vsync: this);
+  _tabController.addListener(_handleTabSelection);
+  
+  // Load report data with timeout
+  _loadReportDataWithTimeout();
+}
+
+void _loadReportDataWithTimeout() {
+  _loadReportData();
+  
+  // Add a 15-second timeout
+  Future.delayed(const Duration(seconds: 15), () {
+    if (_isLoading && mounted) {
+      print('Loading timed out - resetting loading state');
+      setState(() {
+        _isLoading = false;
+      });
+      
+      // Add fallback data for UI rendering
+      if (_reportData['blood_pressure'].isEmpty && 
+          _reportData['weight'].isEmpty && 
+          _reportData['activity'].isEmpty) {
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to load data. Please check your connection and try again.'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  });
+}
   
   void _handleTabSelection() {
     if (_tabController.indexIsChanging) {
@@ -94,266 +121,461 @@ class _ReportsScreenState extends State<ReportsScreen> with TickerProviderStateM
   }
   
   Future<void> _loadReportData() async {
-    setState(() {
-      _isLoading = true;
-    });
-    
-    try {
-      // Get current user
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) {
-        // Handle not logged in state
-        _loadMockData();
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in to view your reports')),
-        );
-        return;
-      }
-      
-      String userId = currentUser.uid;
-      
-      // Load blood pressure data
-      await _loadBloodPressureData(userId);
-      
-      // Load weight data
-      await _loadWeightData(userId);
-      
-      // Load activity data
-      await _loadActivityData(userId);
-      
-      // Calculate summary metrics
-      _calculateSummaryMetrics();
+  setState(() {
+    _isLoading = true;
+  });
+  
+  try {
+    // Get current user
+    User? currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      // Handle not logged in state
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to view your reports')),
+      );
       
       setState(() {
         _isLoading = false;
       });
-    } catch (e) {
-      print('Error loading report data: $e');
-      _loadMockData();
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
-        );
-        setState(() {
-          _isLoading = false;
+      return;
+    }
+    
+    String userId = currentUser.uid;
+    print('Current user ID: $userId');
+    
+    // If you're testing with a specific user ID, you can override here
+    // Comment this out in production!
+    // userId = "n1IPNNKArRNz4LQre6FKNkNOH3z1";
+    
+    // Load blood pressure data
+    await _loadBloodPressureData(userId);
+    
+    // Load weight data
+    await _loadWeightData(userId);
+    
+    // Load activity data
+    await _loadActivityData(userId);
+    
+    // Calculate summary metrics
+    _calculateSummaryMetrics();
+    
+    print('All data loaded successfully');
+    
+    setState(() {
+      _isLoading = false;
+    });
+  } catch (e) {
+    print('Error loading report data: $e');
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading data: $e')),
+      );
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+}
+  
+  Future<void> _loadBloodPressureData(String userId) async {
+  try {
+    print('Loading blood pressure data for user: $userId');
+    
+    // Query blood pressure readings within date range
+    var bpDocs = await _firestore
+        .collection('vital_signs')
+        .where('user_id', isEqualTo: userId)
+        .where('timestamp', isGreaterThanOrEqualTo: _startDate)
+        .where('timestamp', isLessThanOrEqualTo: _endDate)
+        .orderBy('timestamp', descending: false)
+        .get();
+    
+    print('Found ${bpDocs.docs.length} blood pressure readings');
+    
+    List<Map<String, dynamic>> bpReadings = [];
+    
+    if (bpDocs.docs.isNotEmpty) {
+      for (var doc in bpDocs.docs) {
+        var data = doc.data();
+        print('Raw BP data: $data'); // Debug print
+        
+        // Safer parsing
+        int systolic = 0;
+        int diastolic = 0;
+        int pulse = 0;
+        
+        // Handle systolic BP
+        if (data.containsKey('systolic_BP')) {
+          var systolicValue = data['systolic_BP'];
+          if (systolicValue != null) {
+            if (systolicValue is int) {
+              systolic = systolicValue;
+            } else if (systolicValue is String) {
+              systolic = int.tryParse(systolicValue) ?? 0;
+            }
+          }
+        }
+        
+        // Handle diastolic
+        if (data.containsKey('diastolic')) {
+          var diastolicValue = data['diastolic'];
+          if (diastolicValue != null) {
+            if (diastolicValue is int) {
+              diastolic = diastolicValue;
+            } else if (diastolicValue is String) {
+              diastolic = int.tryParse(diastolicValue) ?? 0;
+            }
+          }
+        }
+        
+        // Handle pulse
+        if (data.containsKey('pulse')) {
+          var pulseValue = data['pulse'];
+          if (pulseValue != null) {
+            if (pulseValue is int) {
+              pulse = pulseValue;
+            } else if (pulseValue is String) {
+              pulse = int.tryParse(pulseValue) ?? 0;
+            }
+          }
+        }
+        
+        bpReadings.add({
+          'systolic_BP': systolic,
+          'systolic': systolic, // Add this for compatibility
+          'diastolic': diastolic,
+          'pulse': pulse,
+          'timestamp': data['timestamp'],
+          'date': (data['timestamp'] as Timestamp).toDate(),
+          'id': doc.id,
         });
       }
     }
+    
+    setState(() {
+      _reportData['blood_pressure'] = bpReadings;
+    });
+  } catch (e) {
+    print('Error loading blood pressure data: $e');
+    rethrow;
   }
-  
-  Future<void> _loadBloodPressureData(String userId) async {
-    try {
-      // Query blood pressure readings within date range
-      var bpDocs = await _firestore
-          .collection('vital_signs')
-          .where('user_id', isEqualTo: userId)
-          .where('timestamp', isGreaterThanOrEqualTo: _startDate)
-          .where('timestamp', isLessThanOrEqualTo: _endDate)
-          .orderBy('timestamp', descending: false)
-          .get();
-      
-      List<Map<String, dynamic>> bpReadings = [];
-      
-      if (bpDocs.docs.isNotEmpty) {
-        for (var doc in bpDocs.docs) {
-          var data = doc.data();
-          
-          // Parse values, handling potential string values
-          int systolic = int.tryParse(data['systolic_BP'] ) ?? 0;
-          int diastolic = int.tryParse(data['diastolic'] ) ?? 0;
-          int pulse = int.tryParse(data['pulse'] ) ?? 0;
-          
-          bpReadings.add({
-            'systolic_BP': systolic,
-            'diastolic': diastolic,
-            'pulse': pulse,
-            'timestamp': data['timestamp'],
-            'date': (data['timestamp'] as Timestamp).toDate(),
-            'id': doc.id,
-          });
+}
+
+Future<void> _loadWeightData(String userId) async {
+  try {
+    print('Loading weight data for user: $userId');
+    
+    // Query weight readings within date range
+    var weightDocs = await _firestore
+        .collection('weight')
+        .where('user_id', isEqualTo: userId)
+        .where('timestamp', isGreaterThanOrEqualTo: _startDate)
+        .where('timestamp', isLessThanOrEqualTo: _endDate)
+        .orderBy('timestamp', descending: false)
+        .get();
+    
+    print('Found ${weightDocs.docs.length} weight readings');
+    
+    List<Map<String, dynamic>> weightReadings = [];
+    
+    if (weightDocs.docs.isNotEmpty) {
+      for (var doc in weightDocs.docs) {
+        var data = doc.data();
+        print('Raw weight data: $data'); // Debug print
+        
+        // More careful parsing to avoid null errors
+        double weight = 0.0;
+        double bmi = 0.0;
+        
+        // Handle weight - using safer parsing approach
+        if (data.containsKey('current')) {
+          var currentValue = data['current'];
+          if (currentValue != null) {
+            if (currentValue is double) {
+              weight = currentValue;
+            } else if (currentValue is int) {
+              weight = currentValue.toDouble();
+            } else if (currentValue is String) {
+              weight = double.tryParse(currentValue) ?? 0.0;
+            }
+          }
         }
-      }
-      
-      setState(() {
-        _reportData['blood_pressure'] = bpReadings;
-      });
-    } catch (e) {
-      print('Error loading blood pressure data: $e');
-      rethrow;
-    }
-  }
-  
-  Future<void> _loadWeightData(String userId) async {
-    try {
-      // Query weight readings within date range
-      var weightDocs = await _firestore
-          .collection('weight')
-          .where('user_id', isEqualTo: userId)
-          .where('timestamp', isGreaterThanOrEqualTo: _startDate)
-          .where('timestamp', isLessThanOrEqualTo: _endDate)
-          .orderBy('timestamp', descending: false)
-          .get();
-      
-      List<Map<String, dynamic>> weightReadings = [];
-      
-      if (weightDocs.docs.isNotEmpty) {
-        for (var doc in weightDocs.docs) {
-          var data = doc.data();
-          
-          // Parse values
-          double weight = double.tryParse(data['current']) ?? 0.0;
-          double bmi = double.tryParse(data['bmi'] ) ?? 0.0;
-          
-          weightReadings.add({
-            'weight': weight,
-            'bmi': bmi,
-            'timestamp': data['timestamp'],
-            'date': (data['timestamp'] as Timestamp).toDate(),
-            'id': doc.id,
-          });
+        
+        // Handle BMI - using safer parsing approach
+        if (data.containsKey('bmi')) {
+          var bmiValue = data['bmi'];
+          if (bmiValue != null) {
+            if (bmiValue is double) {
+              bmi = bmiValue;
+            } else if (bmiValue is int) {
+              bmi = bmiValue.toDouble();
+            } else if (bmiValue is String) {
+              bmi = double.tryParse(bmiValue) ?? 0.0;
+            }
+          }
         }
+        
+        weightReadings.add({
+          'weight': weight,
+          'bmi': bmi,
+          'timestamp': data['timestamp'],
+          'date': (data['timestamp'] as Timestamp).toDate(),
+          'id': doc.id,
+          'current': weight, // Add this for compatibility with other methods
+        });
       }
-      
-      setState(() {
-        _reportData['weight'] = weightReadings;
-      });
-    } catch (e) {
-      print('Error loading weight data: $e');
-      rethrow;
     }
+    
+    setState(() {
+      _reportData['weight'] = weightReadings;
+    });
+  } catch (e) {
+    print('Error loading weight data: $e');
+    rethrow;
   }
-  
-  Future<void> _loadActivityData(String userId) async {
-    try {
-      // Query activity data within date range
-      var activityDocs = await _firestore
-          .collection('activity')
-          .where('user_id', isEqualTo: userId)
-          .where('timestamp', isGreaterThanOrEqualTo: _startDate)
-          .where('timestamp', isLessThanOrEqualTo: _endDate)
-          .orderBy('timestamp', descending: false)
-          .get();
-      
-      List<Map<String, dynamic>> activityReadings = [];
-      
-      if (activityDocs.docs.isNotEmpty) {
-        for (var doc in activityDocs.docs) {
-          var data = doc.data();
-          
-          // Parse values
-          int steps = int.tryParse(data['steps'] ?? '0') ?? 0;
-          int calories = int.tryParse(data['calories'] ?? '0') ?? 0;
-          double distance = double.tryParse(data['distance'] ?? '0.0') ?? 0.0;
-          int activeMinutes = int.tryParse(data['active_minutes'] ?? '0') ?? 0;
-          
-          activityReadings.add({
-            'steps': steps,
-            'calories': calories,
-            'distance': distance,
-            'active_minutes': activeMinutes,
-            'timestamp': data['timestamp'],
-            'date': (data['timestamp'] as Timestamp).toDate(),
-            'id': doc.id,
-          });
+}
+
+Future<void> _loadActivityData(String userId) async {
+  try {
+    print('Loading activity data for user: $userId');
+    
+    // Query activity data within date range
+    var activityDocs = await _firestore
+        .collection('activity')
+        .where('user_id', isEqualTo: userId)
+        .where('timestamp', isGreaterThanOrEqualTo: _startDate)
+        .where('timestamp', isLessThanOrEqualTo: _endDate)
+        .orderBy('timestamp', descending: false)
+        .get();
+    
+    print('Found ${activityDocs.docs.length} activity records');
+    
+    List<Map<String, dynamic>> activityReadings = [];
+    
+    if (activityDocs.docs.isNotEmpty) {
+      for (var doc in activityDocs.docs) {
+        var data = doc.data();
+        print('Raw activity data: $data'); // Debug print
+        
+        // Safer parsing of string values
+        int steps = 0;
+        int calories = 0;
+        double distance = 0.0;
+        int activeMinutes = 0;
+        
+        // Parse steps
+        if (data.containsKey('steps')) {
+          var stepsValue = data['steps'];
+          if (stepsValue != null) {
+            if (stepsValue is int) {
+              steps = stepsValue;
+            } else if (stepsValue is String) {
+              steps = int.tryParse(stepsValue) ?? 0;
+            }
+          }
         }
+        
+        // Parse calories
+        if (data.containsKey('calories')) {
+          var caloriesValue = data['calories'];
+          if (caloriesValue != null) {
+            if (caloriesValue is int) {
+              calories = caloriesValue;
+            } else if (caloriesValue is String) {
+              calories = int.tryParse(caloriesValue) ?? 0;
+            }
+          }
+        }
+        
+        // Parse distance
+        if (data.containsKey('distance')) {
+          var distanceValue = data['distance'];
+          if (distanceValue != null) {
+            if (distanceValue is double) {
+              distance = distanceValue;
+            } else if (distanceValue is int) {
+              distance = distanceValue.toDouble();
+            } else if (distanceValue is String) {
+              distance = double.tryParse(distanceValue) ?? 0.0;
+            }
+          }
+        }
+        
+        // Parse active_minutes
+        if (data.containsKey('active_minutes')) {
+          var activeValue = data['active_minutes'];
+          if (activeValue != null) {
+            if (activeValue is int) {
+              activeMinutes = activeValue;
+            } else if (activeValue is String) {
+              activeMinutes = int.tryParse(activeValue) ?? 0;
+            }
+          }
+        }
+        
+        activityReadings.add({
+          'steps': steps,
+          'calories': calories,
+          'distance': distance,
+          'active_minutes': activeMinutes,
+          'timestamp': data['timestamp'],
+          'date': (data['timestamp'] as Timestamp).toDate(),
+          'id': doc.id,
+        });
       }
-      
-      setState(() {
-        _reportData['activity'] = activityReadings;
-      });
-    } catch (e) {
-      print('Error loading activity data: $e');
-      rethrow;
     }
+    
+    setState(() {
+      _reportData['activity'] = activityReadings;
+    });
+  } catch (e) {
+    print('Error loading activity data: $e');
+    rethrow;
   }
+}
   
   void _calculateSummaryMetrics() {
-  // Reset summary metrics
-  _summaryMetrics = {
-    'bp_highest': {'systolic': 0, 'diastolic': 0, 'date': DateTime.now()},
-    'bp_lowest': {'systolic': 999, 'diastolic': 999, 'date': DateTime.now()},
-    'bp_average': {'systolic': 0, 'diastolic': 0},
-    'weight_highest': {'value': 0.0, 'date': DateTime.now()},
-    'weight_lowest': {'value': 999.0, 'date': DateTime.now()},
-    'weight_average': 0.0,
-    'steps_highest': {'value': 0, 'date': DateTime.now()},
-    'steps_average': 0,
-    'total_activity_minutes': 0,
-  };
-
-  // Process blood pressure data
-  final bpList = _reportData['blood_pressure'] as List;
-  if (bpList.isNotEmpty) {
-    int systolicSum = 0;
-    int diastolicSum = 0;
-    for (var reading in bpList) {
-      if (reading['systolic_BP'] > _summaryMetrics['bp_highest']['systolic']) {
-        _summaryMetrics['bp_highest'] = {
-          'systolic': reading['systolic_BP'],
-          'diastolic': reading['diastolic'],
-          'date': reading['date'],
-        };
-      }
-      if (reading['systolic_BP'] < _summaryMetrics['bp_lowest']['systolic']) {
-        _summaryMetrics['bp_lowest'] = {
-          'systolic': reading['systolic_BP'],
-          'diastolic': reading['diastolic'],
-          'date': reading['date'],
-        };
-      }
-      systolicSum += reading['systolic_BP'] as int;
-      diastolicSum += reading['diastolic'] as int;
-    }
-    _summaryMetrics['bp_average'] = {
-      'systolic': (systolicSum / bpList.length).round(),
-      'diastolic': (diastolicSum / bpList.length).round(),
+  try {
+    // Reset summary metrics
+    _summaryMetrics = {
+      'bp_highest': {'systolic': 0, 'diastolic': 0, 'date': DateTime.now()},
+      'bp_lowest': {'systolic': 999, 'diastolic': 999, 'date': DateTime.now()},
+      'bp_average': {'systolic': 0, 'diastolic': 0},
+      'weight_highest': {'value': 0.0, 'date': DateTime.now()},
+      'weight_lowest': {'value': 999.0, 'date': DateTime.now()},
+      'weight_average': 0.0,
+      'steps_highest': {'value': 0, 'date': DateTime.now()},
+      'steps_average': 0,
+      'total_activity_minutes': 0,
     };
-  }
 
-  // Process weight data
-  final weightList = _reportData['weight'] as List;
-  if (weightList.isNotEmpty) {
-    double weightSum = 0;
-    for (var reading in weightList) {
-      if (reading['weight'] > _summaryMetrics['weight_highest']['value']) {
-        _summaryMetrics['weight_highest'] = {
-          'value': reading['weight'],
-          'date': reading['date'],
+    // Process blood pressure data
+    final bpList = _reportData['blood_pressure'] as List;
+    if (bpList.isNotEmpty) {
+      int systolicSum = 0;
+      int diastolicSum = 0;
+      
+      for (var reading in bpList) {
+        // Use systolic_BP field name
+        if (reading.containsKey('systolic_BP') && reading['systolic_BP'] != null) {
+          int systolicBP = reading['systolic_BP'] as int;
+          int diastolic = reading['diastolic'] as int;
+          
+          if (systolicBP > _summaryMetrics['bp_highest']['systolic']) {
+            _summaryMetrics['bp_highest'] = {
+              'systolic': systolicBP,
+              'diastolic': diastolic,
+              'date': reading['date'],
+            };
+          }
+          
+          if (systolicBP < _summaryMetrics['bp_lowest']['systolic']) {
+            _summaryMetrics['bp_lowest'] = {
+              'systolic': systolicBP,
+              'diastolic': diastolic,
+              'date': reading['date'],
+            };
+          }
+          
+          systolicSum += systolicBP;
+          diastolicSum += diastolic;
+        }
+      }
+      
+      if (bpList.length > 0) {
+        _summaryMetrics['bp_average'] = {
+          'systolic': (systolicSum / bpList.length).round(),
+          'diastolic': (diastolicSum / bpList.length).round(),
         };
       }
-      if (reading['current'] < _summaryMetrics['weight_lowest']['value']) {
-        _summaryMetrics['weight_lowest'] = {
-          'value': reading['current'],
-          'date': reading['date'],
-        };
-      }
-      weightSum += reading['weight'];
     }
-    _summaryMetrics['weight_average'] =
-        double.parse((weightSum / weightList.length).toStringAsFixed(1));
-  }
 
-  // Process activity data
-  final activityList = _reportData['activity'] as List;
-  if (activityList.isNotEmpty) {
-    int stepsSum = 0;
-    int totalActiveMinutes = 0;
-    for (var reading in activityList) {
-      if (reading['steps'] > _summaryMetrics['steps_highest']['value']) {
-        _summaryMetrics['steps_highest'] = {
-          'value': reading['steps'],
-          'date': reading['date'],
-        };
+    // Process weight data
+    final weightList = _reportData['weight'] as List;
+    if (weightList.isNotEmpty) {
+      double weightSum = 0.0;
+      
+      for (var reading in weightList) {
+        if (reading.containsKey('weight') && reading['weight'] != null) {
+          // Safely handle weight value
+          double weightValue = 0.0;
+          
+          if (reading['weight'] is int) {
+            weightValue = (reading['weight'] as int).toDouble();
+          } else if (reading['weight'] is double) {
+            weightValue = reading['weight'] as double;
+          }
+          
+          if (weightValue > _summaryMetrics['weight_highest']['value']) {
+            _summaryMetrics['weight_highest'] = {
+              'value': weightValue,
+              'date': reading['date'],
+            };
+          }
+          
+          if (weightValue < _summaryMetrics['weight_lowest']['value']) {
+            _summaryMetrics['weight_lowest'] = {
+              'value': weightValue,
+              'date': reading['date'],
+            };
+          }
+          
+          weightSum += weightValue;
+        }
       }
-      stepsSum += reading['steps'] as int;
-      totalActiveMinutes += reading['active_minutes'] as int;
+      
+      if (weightList.length > 0) {
+        _summaryMetrics['weight_average'] =
+            double.parse((weightSum / weightList.length).toStringAsFixed(1));
+      }
     }
-    _summaryMetrics['steps_average'] = (stepsSum / activityList.length).round();
-    _summaryMetrics['total_activity_minutes'] = totalActiveMinutes;
+
+    // Process activity data
+    final activityList = _reportData['activity'] as List;
+    if (activityList.isNotEmpty) {
+      int stepsSum = 0;
+      int totalActiveMinutes = 0;
+      
+      for (var reading in activityList) {
+        if (reading.containsKey('steps') && reading['steps'] != null) {
+          // Safely handle steps value
+          int stepsValue = reading['steps'] as int;
+          
+          if (stepsValue > _summaryMetrics['steps_highest']['value']) {
+            _summaryMetrics['steps_highest'] = {
+              'value': stepsValue,
+              'date': reading['date'],
+            };
+          }
+          
+          stepsSum += stepsValue;
+        }
+        
+        if (reading.containsKey('active_minutes') && reading['active_minutes'] != null) {
+          totalActiveMinutes += reading['active_minutes'] as int;
+        }
+      }
+      
+      if (activityList.length > 0) {
+        _summaryMetrics['steps_average'] = (stepsSum / activityList.length).round();
+        _summaryMetrics['total_activity_minutes'] = totalActiveMinutes;
+      }
+    }
+  } catch (e) {
+    print('Error calculating summary metrics: $e');
+    // Fallback to ensure the app doesn't crash
+    _summaryMetrics = {
+      'bp_highest': {'systolic': 0, 'diastolic': 0, 'date': DateTime.now()},
+      'bp_lowest': {'systolic': 0, 'diastolic': 0, 'date': DateTime.now()},
+      'bp_average': {'systolic': 0, 'diastolic': 0},
+      'weight_highest': {'value': 0.0, 'date': DateTime.now()},
+      'weight_lowest': {'value': 0.0, 'date': DateTime.now()},
+      'weight_average': 0.0,
+      'steps_highest': {'value': 0, 'date': DateTime.now()},
+      'steps_average': 0,
+      'total_activity_minutes': 0,
+    };
   }
 }
   
