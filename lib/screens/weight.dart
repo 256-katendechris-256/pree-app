@@ -48,67 +48,127 @@ class _WeightScreenState extends State<WeightScreen> {
     _fetchWeightData();
   }
 
-  // Fetch weight data from Firebase
-  Future<void> _fetchWeightData() async {
-    setState(() {
-      _isLoading = true;
-    });
+  // Updated fetchWeightData method to correctly access weight data
+Future<void> _fetchWeightData() async {
+  setState(() {
+    _isLoading = true;
+    void _showEntryDetailsDialog(Map<String, dynamic> entry) {
+    final DateTime entryDate = entry['date'] as DateTime;
 
-    try {
-      User? currentUser = _auth.currentUser;
-      if (currentUser == null) {
-        throw Exception('User not logged in');
-      }
-      String userId = currentUser.uid;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Entry on ${DateFormat('MMM d, yyyy').format(entryDate)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Weight: ${entry['weight']} ${_currentWeight['unit']}'),
+            const SizedBox(height: 8),
+            Text('Date: ${DateFormat('EEEE, MMM d, yyyy').format(entryDate)}'),
+            const SizedBox(height: 8),
+            Text('Time: ${DateFormat('h:mm a').format(entryDate)}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteWeightEntry(entry['id']);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
 
-      // Get the latest weight entry
-      var latestWeightDoc = await _firestore
-          .collection('user')
-          .doc(userId)
-          .collection('weight')
-          .orderBy('date', descending: false)
-          .limit(1)
-          .get();
+  void _navigateToAddWeightScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const ManualWeightScreen(),
+      ),
+    );
 
-      if (latestWeightDoc.docs.isNotEmpty) {
-        var data = latestWeightDoc.docs.first.data();
-        setState(() {
-          _currentWeight = {
-            'weight': data['weight'] ?? 0.0,
-            'bmi': data['bmi'] ?? 0.0,
-            'goal': data['goal'] ?? 70.0,
-            'unit': data['unit'] ?? 'kg',
-            'date': (data['date'] as Timestamp).toDate(),
-          };
-        });
-      }
+    if (result == true && mounted) {
+      _fetchWeightData();
+    }
+  }
+});
 
-      // Get last 30 days of weight entries
-      var monthlyData = await _firestore
-          .collection('user')
-          .doc(userId)
-          .collection('weight')
-          .orderBy('date')
-          .where('date',
-              isGreaterThan: DateTime.now().subtract(const Duration(days: 30)))
-          .get();
+  try {
+    User? currentUser = _auth.currentUser;
+    if (currentUser == null) {
+      throw Exception('User not logged in');
+    }
+    String userId = currentUser.uid;
+    print('Fetching weight data for user ID: $userId');
 
-      List<Map<String, dynamic>> weights = [];
-      for (var doc in monthlyData.docs) {
-        var data = doc.data();
-        weights.add({
-          'weight': data['weight'] ?? 0.0,
-          'date': (data['date'] as Timestamp).toDate(),
-          'id': doc.id,
-        });
-      }
+    // Get the weight collection directly (not under user collection)
+    var weightDocs = await _firestore
+        .collection('weight')  // Direct collection, not nested under user
+        .where('user_id', isEqualTo: userId)
+        .orderBy('timestamp', descending: true)
+        .get();
 
+    print('Found ${weightDocs.docs.length} weight documents');
+
+    if (weightDocs.docs.isNotEmpty) {
+      // Get the latest weight
+      var latestDoc = weightDocs.docs.first;
+      var latestData = latestDoc.data();
+      print('Latest weight data: $latestData');
+
+      // Map Firestore field names to your app's field names
       setState(() {
-        _monthlyWeights = weights;
-        _isLoading = false;
+        _currentWeight = {
+          'weight': latestData['current'] ?? 0.0,  // 'current' is the field name in Firestore
+          'bmi': latestData['bmi'] ?? 0.0,
+          'goal': latestData['goal'] ?? 70.0,  // You may need to get this from user collection
+          'unit': 'kg',  // Default unit
+          'date': (latestData['timestamp'] as Timestamp).toDate(),
+        };
       });
-    } catch (e) {
-      print('Error fetching weight data: $e');
+    }
+
+    // Get weight entries for the last 30 days
+    var thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
+    var monthlyData = await _firestore
+        .collection('weight')
+        .where('user_id', isEqualTo: userId)
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(thirtyDaysAgo))
+        .orderBy('timestamp')
+        .get();
+
+    List<Map<String, dynamic>> weights = [];
+    for (var doc in monthlyData.docs) {
+      var data = doc.data();
+      weights.add({
+        'weight': data['current'] ?? 0.0,  // Use 'current' field from Firestore
+        'date': (data['timestamp'] as Timestamp).toDate(),
+        'id': doc.id,
+      });
+    }
+
+    setState(() {
+      _monthlyWeights = weights;
+      _isLoading = false;
+    });
+    
+    print('Successfully loaded ${weights.length} weight entries');
+  } catch (e) {
+    print('Error fetching weight data: $e');
+    
+    // Only show dummy data if there's no data available at all
+    if (_monthlyWeights.isEmpty) {
       setState(() {
         _currentWeight = {
           'weight': 75.5,
@@ -126,15 +186,16 @@ class _WeightScreenState extends State<WeightScreen> {
         });
         _isLoading = false;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(e.toString().contains('User not logged in')
-                ? 'Please log in to view your weight data'
-                : 'Error loading data: $e')),
-      );
     }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(e.toString().contains('User not logged in')
+              ? 'Please log in to view your weight data'
+              : 'Error loading data: $e')),
+    );
   }
+}
 
   @override
   Widget build(BuildContext context) {

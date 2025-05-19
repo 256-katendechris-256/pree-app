@@ -1,9 +1,9 @@
-// screens/manual_weight_screen.dart
+// Updated ManualWeightScreen class
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:math';
+import 'package:intl/intl.dart';
 
 class ManualWeightScreen extends StatefulWidget {
   const ManualWeightScreen({super.key});
@@ -13,208 +13,163 @@ class ManualWeightScreen extends StatefulWidget {
 }
 
 class _ManualWeightScreenState extends State<ManualWeightScreen> {
+  // Text controllers
   final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _dateController = TextEditingController();
-  final TextEditingController _timeController = TextEditingController();
-  final FocusNode _weightFocusNode = FocusNode();
+  final TextEditingController _heightController = TextEditingController();
   
-  bool _showNumpad = false;
+  // Firebase instances
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
+  // Height in cm
+  double _heightInCm = 170.0;
+  
+  // Weight in kg
+  double _weightInKg = 70.0;
+  
+  // BMI
+  double _bmi = 0.0;
+  
+  // Previous weight value from Firestore
+  double? _previousWeight;
+  
+  // Loading state
   bool _isLoading = false;
-  String _currentFieldValue = '';
-  TextEditingController? _currentController;
-  FocusNode? _currentFocusNode;
   
-  // Weight unit selection
-  String _selectedUnit = 'kg'; // Default to kg
-
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    _dateController.text = DateFormat('dd/MM/yyyy').format(now);
-    _timeController.text = DateFormat('h:mm a').format(now);
-    _currentController = _weightController;
-    _currentFocusNode = _weightFocusNode;
+    _loadUserData();
   }
-
-  @override
-  void dispose() {
-    _weightController.dispose();
-    _dateController.dispose();
-    _timeController.dispose();
-    _weightFocusNode.dispose();
-    super.dispose();
-  }
-
-  void _onNumpadPressed(String value) {
-    if (_currentController == null) return;
-
-    setState(() {
-      if (value == '⌫') {
-        if (_currentFieldValue.isNotEmpty) {
-          _currentFieldValue = _currentFieldValue.substring(0, _currentFieldValue.length - 1);
-        }
-      } else if (value == 'Next') {
-        _saveWeight();
-      } else if (value == '.' && !_currentFieldValue.contains('.')) {
-        // Allow decimal point only if it doesn't already exist
-        _currentFieldValue = _currentFieldValue.isEmpty ? '0.' : '$_currentFieldValue.';
-      } else if (value != '.' && value != ',') {
-        // Handle numeric input
-        final newValue = _currentFieldValue + value;
-        // Validate weight input - allow up to 250 kg or 550 lbs with one decimal place
-        if (_selectedUnit == 'kg') {
-          if (newValue.contains('.')) {
-            // Allow one decimal place
-            final parts = newValue.split('.');
-            if (parts.length == 2 && parts[1].length <= 1) {
-              if (double.tryParse(newValue) != null && double.parse(newValue) <= 250) {
-                _currentFieldValue = newValue;
-              }
-            }
-          } else {
-            if (int.tryParse(newValue) != null && int.parse(newValue) <= 250) {
-              _currentFieldValue = newValue;
-            }
-          }
-        } else { // lbs
-          if (newValue.contains('.')) {
-            // Allow one decimal place
-            final parts = newValue.split('.');
-            if (parts.length == 2 && parts[1].length <= 1) {
-              if (double.tryParse(newValue) != null && double.parse(newValue) <= 550) {
-                _currentFieldValue = newValue;
-              }
-            }
-          } else {
-            if (int.tryParse(newValue) != null && int.parse(newValue) <= 550) {
-              _currentFieldValue = newValue;
-            }
-          }
-        }
-      }
-      _currentController!.text = _currentFieldValue;
-    });
-  }
-
-  void _setFocusToField(TextEditingController controller, FocusNode focusNode) {
-    setState(() {
-      _currentController = controller;
-      _currentFocusNode = focusNode;
-      _currentFieldValue = controller.text;
-      focusNode.requestFocus();
-    });
-  }
-
-  Future<void> _saveWeight() async {
-    if (_weightController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a weight value')),
-      );
-      return;
-    }
-
-    final User? user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not authenticated')),
-      );
-      return;
-    }
-
+  
+  Future<void> _loadUserData() async {
     try {
-      setState(() {
-        _isLoading = true;
-      });
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) return;
       
-      final date = DateFormat('dd/MM/yyyy').parse(_dateController.text);
-      final time = DateFormat('h:mm a').parse(_timeController.text);
-      
-      final DateTime timestamp = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      );
-
-      // Convert to double and handle unit conversion if needed
-      double weightValue = double.parse(_weightController.text);
-      double weightInKg = _selectedUnit == 'kg' ? weightValue : weightValue * 0.45359237;
-
-      // Get user's height from the users collection (in cm)
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      if (!userDoc.exists || !userDoc.data()!.containsKey('height')) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Height information is missing. Please update your profile first.')),
-        );
-        setState(() {
-          _isLoading = false;
-        });
-        return;
+      // Try to get the user's height from their profile
+      var userDoc = await _firestore.collection('user').doc(currentUser.uid).get();
+      if (userDoc.exists && userDoc.data()!.containsKey('height')) {
+        _heightInCm = userDoc.data()!['height'] ?? 170.0;
+        _heightController.text = _heightInCm.toString();
       }
-
-      // Height should be in cm, convert to meters for BMI calculation
-      double heightInCm = double.parse(userDoc.data()!['height'].toString());
-      double heightInMeters = heightInCm / 100;
-
-      // Calculate BMI = weight(kg) / height²(m)
-      double bmi = weightInKg / pow(heightInMeters, 2);
-      String bmiValue = bmi.toStringAsFixed(1);
-
-      // Determine BMI status
-      String bmiStatus;
-      if (bmi < 18.5) {
-        bmiStatus = "Underweight";
-      } else if (bmi >= 18.5 && bmi < 25) {
-        bmiStatus = "Normal";
-      } else if (bmi >= 25 && bmi < 30) {
-        bmiStatus = "Overweight";
-      } else {
-        bmiStatus = "Obese";
-      }
-
-      // Get previous BMI for change calculation
-      String change = "+0.0"; // Default if no previous entry exists
       
-      final previousBmi = await FirebaseFirestore.instance
-          .collection('bmi')
-          .where('user_id', isEqualTo: user.uid)
+      // Get the most recent weight entry to calculate change
+      var weightDocs = await _firestore
+          .collection('weight')
+          .where('user_id', isEqualTo: currentUser.uid)
           .orderBy('timestamp', descending: true)
           .limit(1)
           .get();
       
-      if (previousBmi.docs.isNotEmpty) {
-        double previousBmiValue = double.parse(previousBmi.docs.first['current']);
-        double difference = bmi - previousBmiValue;
-        change = difference >= 0 ? "+${difference.toStringAsFixed(1)}" : difference.toStringAsFixed(1);
-      }
-
-      // Save weight measurement
-      await FirebaseFirestore.instance.collection('weight_measurements').add({
-        'weight': weightValue,
-        'weight_kg': double.parse(weightInKg.toStringAsFixed(1)), // Standardize to 1 decimal place
-        'unit': _selectedUnit,
-        'date': _dateController.text,
-        'time': _timeController.text,
-        'timestamp': Timestamp.fromDate(timestamp),
-        'user_id': user.uid,
-      });
-      
-      // Save BMI record
-      await FirebaseFirestore.instance.collection('bmi').add({
-        'bmi': bmiValue,
-        'current': bmiValue,
-        'change': change,
-        'status': bmiStatus,
-        'timestamp': Timestamp.fromDate(timestamp),
-        'user_id': user.uid,
-      });
-
-      if (mounted) {
-        Navigator.pop(context);
+      if (weightDocs.docs.isNotEmpty) {
+        _previousWeight = weightDocs.docs.first.data()['current'] ?? 0.0;
       }
     } catch (e) {
+      print('Error loading user data: $e');
+    }
+  }
+  
+  void _calculateBMI() {
+    // Formula: BMI = weight(kg) / height(m)²
+    double heightInMeters = _heightInCm / 100;
+    _bmi = _weightInKg / (heightInMeters * heightInMeters);
+    
+    // Round to 1 decimal place
+    _bmi = double.parse(_bmi.toStringAsFixed(1));
+  }
+  
+  String _getBMIStatus(double bmi) {
+    if (bmi < 18.5) {
+      return 'Underweight';
+    } else if (bmi < 25) {
+      return 'Normal';
+    } else if (bmi < 30) {
+      return 'Overweight';
+    } else {
+      return 'Obese';
+    }
+  }
+  
+  Future<void> _saveWeight() async {
+    // Validate inputs
+    if (_weightController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your weight')),
+      );
+      return;
+    }
+    
+    if (_heightController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your height for BMI calculation')),
+      );
+      return;
+    }
+    
+    // Parse weight and height
+    _weightInKg = double.tryParse(_weightController.text) ?? 0.0;
+    _heightInCm = double.tryParse(_heightController.text) ?? 0.0;
+    
+    if (_weightInKg <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid weight')),
+      );
+      return;
+    }
+    
+    if (_heightInCm <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid height')),
+      );
+      return;
+    }
+    
+    // Calculate BMI
+    _calculateBMI();
+    
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      User? currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+      
+      // Calculate weight change if we have a previous weight
+      double change = 0.0;
+      if (_previousWeight != null) {
+        change = _weightInKg - _previousWeight!;
+      }
+      
+      // Get the current timestamp
+      Timestamp timestamp = Timestamp.now();
+      
+      // Save weight entry directly to the weight collection
+      await _firestore.collection('weight').add({
+        'user_id': currentUser.uid,
+        'current': _weightInKg,
+        'bmi': _bmi,
+        'status': _getBMIStatus(_bmi),
+        'timestamp': timestamp,
+        'change': change,
+        'goal': 70.0, // Default goal - can be updated from settings
+      });
+      
+      // Update user's height in the user profile
+      await _firestore.collection('user').doc(currentUser.uid).set({
+        'height': _heightInCm,
+        'last_updated': timestamp,
+      }, SetOptions(merge: true));
+      
+      // Return to previous screen with success status
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      print('Error saving weight entry: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error saving weight: $e')),
@@ -228,590 +183,206 @@ class _ManualWeightScreenState extends State<ManualWeightScreen> {
       }
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0069B4),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Add weight measurement',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _isLoading ? null : _saveWeight,
-            child: _isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  )
-                : const Text(
-                    'ADD',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-          ),
-        ],
+        title: const Text('Add Weight Entry'),
+        backgroundColor: Colors.indigo,
+        foregroundColor: Colors.white,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // Form fields
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                  _buildInputField(
-                    label: 'Date:',
-                    controller: _dateController,
-                    readOnly: true,
-                    trailingIcon: Icons.calendar_today,
-                    onTap: () async {
-                      // Hide numpad when selecting date
-                      setState(() {
-                        _showNumpad = false;
-                      });
-
-                      final DateTime? picked = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now(),
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          _dateController.text = DateFormat('dd/MM/yyyy').format(picked);
-                        });
-                      }
-                    },
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Enter your current weight and height',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  _buildInputField(
-                    label: 'Time:',
-                    controller: _timeController,
-                    readOnly: true,
-                    onTap: () async {
-                      // Hide numpad when selecting time
-                      setState(() {
-                        _showNumpad = false;
-                      });
-
-                      final TimeOfDay? picked = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.now(),
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          final now = DateTime.now();
-                          final dt = DateTime(
-                              now.year, now.month, now.day, picked.hour, picked.minute);
-                          _timeController.text = DateFormat('h:mm a').format(dt);
-                        });
-                      }
-                    },
-                  ),
-                  _buildWeightFieldWithUnit(
-                    label: 'Weight:',
+                  const SizedBox(height: 24),
+                  TextField(
                     controller: _weightController,
-                    focusNode: _weightFocusNode,
-                    showCursor: true,
-                    onTap: () {
-                      _setFocusToField(_weightController, _weightFocusNode);
-                      setState(() {
-                        _showNumpad = true;
-                      });
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Weight (kg)',
+                      border: OutlineInputBorder(),
+                      suffixText: 'kg',
+                    ),
+                    onChanged: (value) {
+                      if (value.isNotEmpty && _heightController.text.isNotEmpty) {
+                        setState(() {
+                          _weightInKg = double.tryParse(value) ?? 0.0;
+                          _calculateBMI();
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _heightController,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Height (cm)',
+                      border: OutlineInputBorder(),
+                      suffixText: 'cm',
+                    ),
+                    onChanged: (value) {
+                      if (value.isNotEmpty && _weightController.text.isNotEmpty) {
+                        setState(() {
+                          _heightInCm = double.tryParse(value) ?? 0.0;
+                          _calculateBMI();
+                        });
+                      }
                     },
                   ),
                   const SizedBox(height: 24),
-                  _buildWeightInfo(),
+                  if (_weightController.text.isNotEmpty && _heightController.text.isNotEmpty && _bmi > 0)
+                    _buildBMIPreview(),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: _saveWeight,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.indigo,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text('Save Weight Entry'),
+                    ),
+                  ),
                 ],
               ),
             ),
-          ),
-
-          // Numpad (only shown when a numeric field is tapped)
-          if (_showNumpad)
-            _buildNumpad(),
-        ],
-      ),
     );
   }
-
-  Widget _buildWeightInfo() {
-    return FutureBuilder<QuerySnapshot>(
-      future: FirebaseAuth.instance.currentUser != null
-          ? FirebaseFirestore.instance
-              .collection('bmi')
-              .where('user_id', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
-              .orderBy('timestamp', descending: true)
-              .limit(1)
-              .get()
-          : Future.value(null),
-      builder: (context, snapshot) {
-        // Default BMI info
-        Widget bmiInfo = Column(
+  
+  Widget _buildBMIPreview() {
+    Color bmiColor;
+    String bmiCategory = _getBMIStatus(_bmi);
+    
+    if (_bmi < 18.5) {
+      bmiColor = Colors.blue;
+    } else if (_bmi < 25) {
+      bmiColor = Colors.green;
+    } else if (_bmi < 30) {
+      bmiColor = Colors.orange;
+    } else {
+      bmiColor = Colors.red;
+    }
+    
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Healthy Weight Range:',
+              'BMI Preview',
               style: TextStyle(
-                fontWeight: FontWeight.bold,
                 fontSize: 16,
-                color: Colors.blue,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              _selectedUnit == 'kg' 
-                  ? '• Underweight: Less than 18.5 kg/m²\n• Healthy weight: 18.5 to 24.9 kg/m²\n• Overweight: 25 to 29.9 kg/m²\n• Obesity: 30 kg/m² or higher'
-                  : '• Underweight: Less than 40.8 lbs/m²\n• Healthy weight: 40.8 to 54.9 lbs/m²\n• Overweight: 55.1 to 65.9 lbs/m²\n• Obesity: 66.1 lbs/m² or higher',
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.blue,
-              ),
-            ),
-          ],
-        );
-
-        // Show last BMI if available
-        if (snapshot.hasData && snapshot.data != null && snapshot.data!.docs.isNotEmpty) {
-          final bmiData = snapshot.data!.docs.first.data() as Map<String, dynamic>;
-          if (bmiData.isNotEmpty) {
-            bmiInfo = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Your BMI Information:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: Colors.blue,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Current BMI: ${bmiData['current']}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Colors.blue,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Status: ${bmiData['status']}',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Colors.blue,
-                            ),
-                          ),
-                        ],
+                    Text(
+                      '${_bmi.toStringAsFixed(1)}',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.indigo,
                       ),
                     ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          'Change: ${bmiData['change']}',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: bmiData['change'].toString().startsWith('+') 
-                                ? Colors.red 
-                                : (bmiData['change'] == '+0.0' || bmiData['change'] == '0.0') 
-                                    ? Colors.grey 
-                                    : Colors.green,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Date: ${DateFormat('dd/MM/yyyy').format(
-                            (bmiData['timestamp'] as Timestamp).toDate()
-                          )}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
+                    const Text(
+                      'kg/m²',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey,
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                const Divider(color: Colors.blue),
-                const SizedBox(height: 8),
-                Text(
-                  _selectedUnit == 'kg' 
-                      ? '• Underweight: Less than 18.5 kg/m²\n• Healthy weight: 18.5 to 24.9 kg/m²\n• Overweight: 25 to 29.9 kg/m²\n• Obesity: 30 kg/m² or higher'
-                      : '• Underweight: Less than 40.8 lbs/m²\n• Healthy weight: 40.8 to 54.9 lbs/m²\n• Overweight: 55.1 to 65.9 lbs/m²\n• Obesity: 66.1 lbs/m² or higher',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.blue,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: bmiColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    bmiCategory,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
                   ),
                 ),
               ],
-            );
-          }
-        }
-        
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.blue.withOpacity(0.3)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              bmiInfo,
-              const SizedBox(height: 8),
-              const Text(
-                'Note: These are general BMI ranges and may not apply to all individuals.',
-                style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  fontSize: 12,
-                  color: Colors.blue,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildWeightFieldWithUnit({
-    required String label,
-    required TextEditingController controller,
-    VoidCallback? onTap,
-    FocusNode? focusNode,
-    bool showCursor = false,
-  }) {
-    final bool isCurrentFocus = _currentFocusNode == focusNode;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
             ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: isCurrentFocus ? Colors.blue.shade700 : Colors.grey.shade300,
-                    width: isCurrentFocus ? 2.0 : 1.0,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          Text(
-                            controller.text,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          if (showCursor && isCurrentFocus && controller.text.isEmpty)
-                            Container(
-                              width: 2,
-                              height: 20,
-                              color: Colors.blue.shade700,
-                              margin: const EdgeInsets.only(left: 2),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: (_bmi / 40).clamp(0.0, 1.0),
+              backgroundColor: Colors.grey[200],
+              color: bmiColor,
+              minHeight: 8,
+              borderRadius: BorderRadius.circular(4),
             ),
-          ),
-          const SizedBox(width: 8),
-          _buildUnitSelector(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUnitSelector() {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildUnitOption('kg'),
-          _buildUnitOption('lbs'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUnitOption(String unit) {
-    final isSelected = _selectedUnit == unit;
-    
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          if (_selectedUnit != unit) {
-            // Convert weight value when changing units
-            if (_weightController.text.isNotEmpty) {
-              double currentValue = double.tryParse(_weightController.text) ?? 0;
-              if (unit == 'kg' && _selectedUnit == 'lbs') {
-                // Convert from lbs to kg
-                double kgValue = currentValue * 0.45359237;
-                _weightController.text = kgValue.toStringAsFixed(1);
-                _currentFieldValue = _weightController.text;
-              } else if (unit == 'lbs' && _selectedUnit == 'kg') {
-                // Convert from kg to lbs
-                double lbsValue = currentValue / 0.45359237;
-                _weightController.text = lbsValue.toStringAsFixed(1);
-                _currentFieldValue = _weightController.text;
-              }
-            }
-            _selectedUnit = unit;
-          }
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.blue.shade800 : Colors.white,
-          borderRadius: unit == 'kg' 
-              ? const BorderRadius.only(topLeft: Radius.circular(3), bottomLeft: Radius.circular(3))
-              : const BorderRadius.only(topRight: Radius.circular(3), bottomRight: Radius.circular(3)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _buildBMICategoryLabel('Underweight', Colors.blue),
+                _buildBMICategoryLabel('Normal', Colors.green),
+                _buildBMICategoryLabel('Overweight', Colors.orange),
+                _buildBMICategoryLabel('Obese', Colors.red),
+              ],
+            ),
+          ],
         ),
-        child: Text(
-          unit,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.blue.shade800,
+      ),
+    );
+  }
+  
+  Widget _buildBMICategoryLabel(String label, Color color) {
+    return Column(
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10,
             fontWeight: FontWeight.w500,
           ),
         ),
-      ),
+      ],
     );
   }
-
-  Widget _buildInputField({
-    required String label,
-    required TextEditingController controller,
-    String? suffix,
-    bool readOnly = false,
-    VoidCallback? onTap,
-    IconData? trailingIcon,
-    FocusNode? focusNode,
-    bool showCursor = false,
-  }) {
-    final bool isCurrentFocus = _currentFocusNode == focusNode;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16.0),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 16,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: isCurrentFocus ? Colors.blue.shade700 : Colors.grey.shade300,
-                    width: isCurrentFocus ? 2.0 : 1.0,
-                  ),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          Text(
-                            controller.text,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          if (showCursor && isCurrentFocus && controller.text.isEmpty)
-                            Container(
-                              width: 2,
-                              height: 20,
-                              color: Colors.blue.shade700,
-                              margin: const EdgeInsets.only(left: 2),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (suffix != null)
-                      Text(
-                        suffix,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                    if (trailingIcon != null)
-                      Icon(
-                        trailingIcon,
-                        color: Colors.blue.shade800,
-                        size: 20,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNumpad() {
-    return Container(
-      color: Colors.black87,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        children: [
-          // Numpad shortcuts row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildToolbarButton(Icons.note),
-              _buildToolbarButton(Icons.mood),
-              _buildToolbarButton(Icons.grid_on),
-              _buildToolbarButton(Icons.scale),
-              _buildToolbarButton(Icons.settings),
-              _buildToolbarButton(Icons.more_horiz),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Numpad grid
-          Row(
-            children: [
-              Expanded(
-                child: GridView.count(
-                  crossAxisCount: 4,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  childAspectRatio: 1.5,
-                  padding: EdgeInsets.zero,
-                  children: [
-                    _buildNumpadKey('1'),
-                    _buildNumpadKey('2'),
-                    _buildNumpadKey('3'),
-                    _buildNumpadKey('⌫'),
-                    _buildNumpadKey('4'),
-                    _buildNumpadKey('5'),
-                    _buildNumpadKey('6'),
-                    _buildNumpadKey('Next', isBlue: true),
-                    _buildNumpadKey('7'),
-                    _buildNumpadKey('8'),
-                    _buildNumpadKey('9'),
-                    _buildNumpadKey('.'),
-                    _buildNumpadKey('0'),
-                    _buildNumpadKey(''),
-                    _buildNumpadKey(''),
-                    _buildNumpadKey(''),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildToolbarButton(IconData icon) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.grey,
-      ),
-      child: Icon(
-        icon,
-        color: Colors.white,
-        size: 20,
-      ),
-    );
-  }
-
-  Widget _buildNumpadKey(String value, {bool isBlue = false}) {
-    return InkWell(
-      onTap: value.isEmpty ? null : () => _onNumpadPressed(value),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.grey.shade800,
-          border: Border.all(color: Colors.black, width: 0.5),
-        ),
-        child: Center(
-          child: Text(
-            value,
-            style: TextStyle(
-              color: isBlue ? Colors.blue : Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
+  
+  @override
+  void dispose() {
+    _weightController.dispose();
+    _heightController.dispose();
+    super.dispose();
   }
 }

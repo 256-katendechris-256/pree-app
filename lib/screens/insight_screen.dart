@@ -128,7 +128,7 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               insightData['pulse'] = data['sourceData']['pulse'] ?? 0;
             } else if (data['sourceCollection'] == 'weight') {
               insightData['weight'] = data['sourceData']['current'] ?? 0;
-              insightData['bmi'] = data['sourceData']['bmi'] ?? '0';
+              insightData['bmi'] = data['sourceData']['bmi'] ?? 0;
             }
           } else {
             // Handle legacy format or insights without sourceData
@@ -662,13 +662,13 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               children: [
                 _buildMetricItem(
                   icon: Icons.local_fire_department,
-                  value: insight['calories'] ?? '0',
+                  value: insight['calories'] ?? 0,
                   label: 'Calories',
                   color: Colors.orange,
                 ),
                 _buildMetricItem(
                   icon: Icons.straighten,
-                  value: insight['distance'] ?? '0',
+                  value: insight['distance'] ?? 0,
                   label: 'Distance (km)',
                   color: Colors.purple,
                 ),
@@ -706,19 +706,19 @@ class _InsightsScreenState extends State<InsightsScreen> with TickerProviderStat
               children: [
                 _buildMetricItem(
                   icon: Icons.arrow_upward,
-                  value: insight['systolic_BP'] ?? '0',
+                  value: insight['systolic_BP'] ?? 0,
                   label: 'Systolic',
                   color: Colors.red,
                 ),
                 _buildMetricItem(
                   icon: Icons.arrow_downward,
-                  value: insight['diastolic'] ?? '0',
+                  value: insight['diastolic'] ?? 0,
                   label: 'Diastolic',
                   color: Colors.blue,
                 ),
                 _buildMetricItem(
                   icon: Icons.favorite,
-                  value: insight['pulse'] ?? '0',
+                  value: insight['pulse'] ?? 0,
                   label: 'Pulse',
                   color: Colors.purple,
                 ),
